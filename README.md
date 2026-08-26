@@ -66,7 +66,9 @@ reproducible, and testable independently of the interface.
 
 ## Running it
 
-Python 3.11 or later.
+Python **3.11 or 3.12**. The pinned dependency versions do not publish wheels
+for 3.13 or later, so a newer interpreter forces a source build. On Streamlit
+Community Cloud, set the Python version under Manage app → Settings.
 
 ```powershell
 python -m venv .venv
