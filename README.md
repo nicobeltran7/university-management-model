@@ -16,6 +16,7 @@ U.S. Department of Education. Nothing is estimated, simulated or invented.
 | **Opportunities** | Which functions sit furthest from the peer median, and what is that gap worth in dollars? |
 | **Reallocation planner** | If money moved between functions, where would the institution land relative to its peers? |
 | **Program mix** | What does the institution actually produce, by field of study? |
+| **Program returns** | What do those graduates earn, what did they borrow, and how does that compare to the same programme nationally? |
 | **Revenue** | Where does the operating money come from? |
 
 The last two views are the point of the project. Reporting what an institution
@@ -42,6 +43,7 @@ All public domain, all from the U.S. Department of Education.
 | IPEDS Institutional Characteristics | `hd2025` | Directory, sector, level, size, location |
 | IPEDS Derived Enrollment | `drvef122025` | 12-month full-time-equivalent and unduplicated headcount |
 | IPEDS Completions | `c2025_a` | Awards conferred by 6-digit CIP code and award level |
+| College Scorecard (optional) | `Most-Recent-Cohorts-Field-of-Study` | Median earnings and federal loan debt by programme and credential |
 
 Raw data is **not** committed to this repository. It is roughly 50 MB of public
 federal files that anyone can download from the

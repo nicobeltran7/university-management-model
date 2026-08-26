@@ -561,3 +561,79 @@ def headline_findings(unitid: int, fiscal_year: int) -> list[dict]:
         })
 
     return findings
+
+
+# --------------------------------------------------------------------------
+# Program returns (College Scorecard)
+# --------------------------------------------------------------------------
+
+def programs_available() -> bool:
+    """Whether the optional Scorecard extract was built."""
+    return (config.PROCESSED / "programs.parquet").exists()
+
+
+@functools.lru_cache(maxsize=1)
+def _programs_view() -> bool:
+    """Register the optional programs extract, once."""
+    if not programs_available():
+        return False
+    path = config.PROCESSED / "programs.parquet"
+    connect().execute(
+        f"CREATE OR REPLACE VIEW programs AS "
+        f"SELECT * FROM read_parquet({_quoted(path)})"
+    )
+    return True
+
+
+def program_returns(unitid: int, min_earners: int = 0) -> pd.DataFrame:
+    """Earnings and debt by program, against the national figure for that program.
+
+    Award counts come from the Scorecard's own IPEDSCOUNT1 field rather than
+    from a join to the Completions extract. The Scorecard reports CIP at four
+    digits and IPEDS at six, so joining them would require collapsing one
+    side and would introduce an avoidable source of error for no gain.
+
+    Only rows where the Scorecard published both an earnings and a debt figure
+    are returned. Roughly four out of five program-and-credential rows are
+    privacy-suppressed because the cohort was too small, so this is a view of
+    the larger programs, not of all of them.
+    """
+    if not _programs_view():
+        return pd.DataFrame()
+    sql = """
+        SELECT program, credential, credential_level, cip4,
+               awards, earners, debt_median, earnings_median,
+               earnings_national_median, earnings_national_p25,
+               earnings_national_p75,
+               debt_median / NULLIF(earnings_median, 0) AS debt_to_earnings,
+               earnings_median - earnings_national_median AS vs_national,
+               (earnings_median - earnings_national_median)
+                   / NULLIF(earnings_national_median, 0) AS vs_national_pct
+        FROM programs
+        WHERE UNITID = ?
+          AND earnings_median IS NOT NULL
+          AND debt_median IS NOT NULL
+          AND coalesce(earners, 0) >= ?
+        ORDER BY earnings_median DESC
+    """
+    return connect().execute(sql, [int(unitid), int(min_earners)]).df()
+
+
+def program_return_summary(unitid: int) -> dict:
+    """Headline figures for the return view."""
+    frame = program_returns(unitid)
+    if frame.empty:
+        return {}
+    with_national = frame.dropna(subset=["vs_national"])
+    return {
+        "programs": int(len(frame)),
+        "median_earnings": float(frame["earnings_median"].median()),
+        "median_debt": float(frame["debt_median"].median()),
+        "median_dte": float(frame["debt_to_earnings"].median()),
+        "above_national": int((with_national["vs_national"] > 0).sum()),
+        "below_national": int((with_national["vs_national"] < 0).sum()),
+        "compared": int(len(with_national)),
+        "best": frame.iloc[0].to_dict(),
+        "worst_dte": frame.sort_values("debt_to_earnings",
+                                      ascending=False).iloc[0].to_dict(),
+    }

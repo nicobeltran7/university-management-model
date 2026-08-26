@@ -170,6 +170,61 @@ def ingest_completions(con: duckdb.DuckDBPyConnection) -> int:
     return con.execute(f"SELECT count(*) FROM read_parquet({_quoted(out)})").fetchone()[0]
 
 
+def ingest_programs(con: duckdb.DuckDBPyConnection) -> int:
+    """College Scorecard field-of-study earnings and debt, by program.
+
+    Optional. When the Scorecard download is absent the extract is not written
+    and the application hides the module rather than failing.
+
+    Two details matter. The Scorecard marks missing values as "NA" and
+    privacy-suppressed values as "PS"; read as text those would turn every
+    numeric column into a string, so both are declared as null strings.
+    And the Scorecard reports CIP at four digits with no decimal point
+    ("1101") while IPEDS reports six with one ("11.0103"), so the join key is
+    derived, not assumed.
+    """
+    src = config.scorecard_field_of_study()
+    if src is None:
+        print("      programs: Scorecard data not found, skipping",
+              file=sys.stderr)
+        return 0
+
+    selects = ", ".join(
+        f'"{raw}" AS {alias}' for raw, alias in config.SCORECARD_COLUMNS.items()
+    )
+    nulls = ", ".join(f"'{v}'" for v in config.SCORECARD_NULLS)
+    out = config.PROCESSED / "programs.parquet"
+    con.execute(
+        f"""
+        COPY (
+            SELECT
+                CAST(unitid AS BIGINT)                    AS UNITID,
+                lpad(CAST(cip4 AS VARCHAR), 4, '0')       AS cip4,
+                trim(rtrim(program, '.'))                 AS program,
+                TRY_CAST(credential_level AS INT)         AS credential_level,
+                credential                                AS credential,
+                TRY_CAST(awards AS INT)                   AS awards,
+                TRY_CAST(debt_median AS DOUBLE)           AS debt_median,
+                TRY_CAST(earners AS INT)                  AS earners,
+                TRY_CAST(earnings_median AS DOUBLE)       AS earnings_median,
+                TRY_CAST(earnings_national_median AS DOUBLE)
+                                                          AS earnings_national_median,
+                TRY_CAST(earnings_national_p25 AS DOUBLE) AS earnings_national_p25,
+                TRY_CAST(earnings_national_p75 AS DOUBLE) AS earnings_national_p75
+            FROM (
+                SELECT {selects}
+                FROM read_csv_auto({_quoted(src)}, header=true, all_varchar=true,
+                                   nullstr=[{nulls}], ignore_errors=true)
+            )
+            WHERE unitid IS NOT NULL
+        ) TO {_quoted(out)} (FORMAT PARQUET)
+        """
+    )
+    return con.execute(
+        f"SELECT count(*) FROM read_parquet({_quoted(out)})"
+    ).fetchone()[0]
+
+
 def main() -> None:
     config.PROCESSED.mkdir(parents=True, exist_ok=True)
     con = _con()
@@ -178,6 +233,7 @@ def main() -> None:
         ("enrollment", ingest_enrollment),
         ("finance", ingest_finance),
         ("completions", ingest_completions),
+        ("programs", ingest_programs),
     ]
     for name, fn in steps:
         rows = fn(con)

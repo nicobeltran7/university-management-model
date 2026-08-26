@@ -11,6 +11,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RAW_IPEDS = ROOT / "Data" / "Finance Data"
 RAW_SCORECARD = ROOT / "Data" / "Scorecard"
+
+
+def scorecard_field_of_study() -> "Path | None":
+    """Locate the College Scorecard field-of-study file.
+
+    The download unzips into a dated folder, so the path is discovered rather
+    than hard-coded. Returns None when the data has not been downloaded, which
+    the application treats as a missing optional module rather than an error.
+    """
+    if not RAW_SCORECARD.exists():
+        return None
+    matches = sorted(RAW_SCORECARD.glob("**/Most-Recent-Cohorts-Field-of-Study.csv"))
+    return matches[0] if matches else None
 # Derived Parquet extracts. Deliberately NOT under data/ or Data/: on a
 # case-insensitive filesystem the raw-data ignore rule would swallow them
 # and no negation can rescue a file inside an excluded directory.
@@ -189,4 +202,46 @@ CIP_FAMILIES = {
     "52": "Business, management and marketing",
     "54": "History",
     "60": "Residency and internship programs",
+}
+
+
+# College Scorecard field-of-study columns retained. Labels are the official
+# ones from the data dictionary.
+SCORECARD_COLUMNS = {
+    "UNITID": "unitid",
+    "CIPCODE": "cip4",                      # 4-digit CIP, no decimal point
+    "CIPDESC": "program",
+    "CREDLEV": "credential_level",
+    "CREDDESC": "credential",
+    "IPEDSCOUNT1": "awards",
+    "DEBT_ALL_STGP_EVAL_MDN": "debt_median",
+    "EARN_COUNT_WNE_5YR": "earners",
+    "EARN_MDN_5YR": "earnings_median",
+    "EARN_MDN_4YR_NAT": "earnings_national_median",
+    "EARN_P25_4YR_NAT": "earnings_national_p25",
+    "EARN_P75_4YR_NAT": "earnings_national_p75",
+}
+
+# Values the Scorecard uses for missing data. "PS" is privacy-suppressed: the
+# cohort was too small to publish. Both must be read as null, not as text,
+# or every numeric column silently becomes a string.
+SCORECARD_NULLS = ["NA", "PS", "PrivacySuppressed", ""]
+
+# Scorecard credential levels.
+CREDENTIAL_LEVELS = {
+    1: "Undergraduate certificate",
+    2: "Associate's degree",
+    3: "Bachelor's degree",
+    4: "Post-baccalaureate certificate",
+    5: "Master's degree",
+    6: "Doctoral degree",
+    7: "First professional degree",
+    8: "Graduate certificate",
+}
+
+# IPEDS award level to Scorecard credential level. Used only to describe the
+# correspondence in the interface; the join itself is on CIP code and
+# credential level as the Scorecard reports them.
+AWARD_TO_CREDENTIAL = {
+    2: 1, 3: 2, 5: 3, 6: 4, 7: 5, 8: 8, 17: 6, 18: 7, 19: 6, 20: 1, 21: 1,
 }

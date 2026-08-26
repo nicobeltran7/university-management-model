@@ -102,13 +102,39 @@ python -m src.ingest
 That command should report 5,985 institutions, 5,806 enrollment records,
 56,140 finance rows and 201,886 completions rows.
 
+## College Scorecard
+
+| File | Purpose |
+|---|---|
+| `Most-Recent-Cohorts-Field-of-Study.csv` | Median earnings five years after entry, and median federal loan debt at completion, by program and credential |
+
+Downloaded from [collegescorecard.ed.gov/data](https://collegescorecard.ed.gov/data/)
+and unzipped anywhere under `Data/Scorecard/`. The path is discovered by glob
+rather than hard-coded, because the download unzips into a dated folder.
+
+This source is **optional**. When it is absent the ingest skips it and the
+Program returns view explains what is missing instead of failing.
+
+Two details in this file matter:
+
+- **Missing values come in two flavours.** `NA` means not applicable and `PS`
+  means privacy-suppressed, that is, the cohort was too small to publish
+  without risking identification. Both are declared as null strings in the
+  ingest. Read as text, either one turns an entire numeric column into a
+  string.
+- **CIP codes are four digits with no decimal point** (`1101`), where IPEDS
+  uses six with one (`11.0103`). The two are therefore not joined. Award
+  counts in the Program returns view come from the Scorecard's own
+  `IPEDSCOUNT1` field, so the view needs no cross-source key.
+
+Columns retained: `UNITID`, `CIPCODE`, `CIPDESC`, `CREDLEV`, `CREDDESC`,
+`IPEDSCOUNT1`, `DEBT_ALL_STGP_EVAL_MDN`, `EARN_COUNT_WNE_5YR`,
+`EARN_MDN_5YR`, `EARN_MDN_4YR_NAT`, `EARN_P25_4YR_NAT`, `EARN_P75_4YR_NAT`.
+
 ## Not yet used
 
-Downloaded and available, but not yet joined:
-
-- **College Scorecard** institution and field-of-study files. These carry
-  graduate earnings and debt by CIP code, which would let the program mix view
-  show what each field actually pays. This is the next planned addition.
 - `f2223_f2`, `f2223_f3`, `f2324_f2`, `f2324_f3` — private nonprofit and
   for-profit finance schedules.
 - `effy2025` — 12-month unduplicated headcount by level and demographic.
+- The 30 `MERGED` panel files in the Scorecard download, which carry
+  institution-level series back to 1996.

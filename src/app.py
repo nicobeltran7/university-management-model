@@ -744,10 +744,159 @@ def render_programs(unitid: int) -> None:
     st.plotly_chart(chart, use_container_width=True)
 
     st.info(
-        "Graduate earnings and median debt by CIP code are published in the "
-        "College Scorecard field-of-study file. Joining that to this view is "
-        "the next planned release, and it is what turns program mix into "
-        "program return."
+        "This view is about volume: what the institution produces and in what "
+        "proportion. What those graduates go on to earn, and what they "
+        "borrowed to get there, is in **Program returns**."
+    )
+
+
+
+# --------------------------------------------------------------------------
+# Program returns
+# --------------------------------------------------------------------------
+
+def render_returns(unitid: int) -> None:
+    st.subheader("What those programs return")
+    st.caption(
+        "Median earnings five years after entry against median federal loan "
+        "debt at completion, by program and credential. Source: College "
+        "Scorecard field-of-study file, U.S. Department of Education."
+    )
+
+    if not transform.programs_available():
+        st.info(
+            "The College Scorecard field-of-study data is not present in this "
+            "deployment. Download it and run `python -m src.ingest` to enable "
+            "this view."
+        )
+        return
+
+    frame = transform.program_returns(unitid)
+    if frame.empty:
+        st.info(
+            "The Scorecard publishes no earnings or debt figures for this "
+            "institution's programs. Rows are suppressed when a cohort is too "
+            "small to report without identifying individuals."
+        )
+        return
+
+    stats = transform.program_return_summary(unitid)
+    columns = st.columns(4)
+    columns[0].metric("Programs with published figures", f"{stats['programs']}")
+    columns[1].metric("Median earnings", money(stats["median_earnings"]),
+                      help="Median across programs of median earnings five "
+                           "years after entry.")
+    columns[2].metric("Median debt", money(stats["median_debt"]),
+                      help="Median across programs of median federal loan "
+                           "debt at completion.")
+    columns[3].metric("Debt to earnings", f"{stats['median_dte']:.2f}",
+                      help="Median debt divided by median earnings. Below "
+                           "1.0 means the typical graduate earns more in a "
+                           "year than they borrowed in total.")
+
+    takeaway(
+        f"Of {stats['compared']} programs the Scorecard can compare, "
+        f"<b>{stats['above_national']} earn above and "
+        f"{stats['below_national']} below the national median for the same "
+        f"program and credential.</b> The highest earning is "
+        f"{stats['best']['program'].lower()} "
+        f"({stats['best']['credential'].lower()}) at "
+        f"{money(stats['best']['earnings_median'])}. The heaviest debt "
+        f"burden relative to earnings is "
+        f"{stats['worst_dte']['program'].lower()} "
+        f"({stats['worst_dte']['credential'].lower()}) at "
+        f"{stats['worst_dte']['debt_to_earnings']:.2f}."
+    )
+
+    st.markdown("**Debt against earnings**")
+    st.caption(
+        "Each point is one program at one credential level, sized by awards "
+        "conferred. The diagonal is the line where a graduate's total "
+        "borrowing equals one year of earnings. Points above it are programs "
+        "where the typical graduate earns more in a year than they borrowed "
+        "in total."
+    )
+    plot = frame.dropna(subset=["debt_median", "earnings_median"]).copy()
+    plot["label"] = plot["program"].str.slice(0, 48) + " · " + plot["credential"]
+    scatter = px.scatter(
+        plot, x="debt_median", y="earnings_median",
+        size=plot["awards"].fillna(1).clip(lower=1),
+        hover_name="label",
+        labels={"debt_median": "Median debt at completion ($)",
+                "earnings_median": "Median earnings, 5 years after entry ($)"},
+        color_discrete_sequence=[theme.SUBJECT],
+        size_max=34,
+    )
+    scatter.update_traces(
+        marker=dict(line=dict(width=1, color=theme.SURFACE), opacity=0.82),
+        hovertemplate="<b>%{hovertext}</b><br>Debt $%{x:,.0f}"
+                      "<br>Earnings $%{y:,.0f}<extra></extra>",
+    )
+    ceiling = float(max(plot["debt_median"].max(), plot["earnings_median"].max()))
+    scatter.add_shape(type="line", x0=0, y0=0, x1=ceiling, y1=ceiling,
+                      line=dict(color=theme.NEUTRAL, width=1, dash="dash"))
+    scatter.update_layout(**theme.plotly_layout(470, legend=False))
+    st.plotly_chart(scatter, use_container_width=True)
+
+    st.markdown("**Against the national figure for the same program**")
+    st.caption(
+        "Difference between this institution's median earnings and the "
+        "national median for the same program at the same credential level. "
+        "This is the fairest comparison the data allows: an English degree is "
+        "measured against English degrees, not against engineering."
+    )
+    national = frame.dropna(subset=["vs_national"]).copy()
+    national["label"] = (national["program"].str.slice(0, 42) + " · "
+                         + national["credential"].str.replace(" Degree", ""))
+    national["position"] = national["vs_national"].apply(
+        lambda v: "Above national median" if v > 0 else "Below national median"
+    )
+    ranked = pd.concat([
+        national.nlargest(8, "vs_national"),
+        national.nsmallest(8, "vs_national"),
+    ]).drop_duplicates(subset="label")
+    bars = px.bar(
+        ranked.sort_values("vs_national"), x="vs_national", y="label",
+        orientation="h", color="position",
+        labels={"vs_national": "Difference from the national median ($)",
+                "label": ""},
+        color_discrete_map={"Above national median": theme.BELOW,
+                            "Below national median": theme.ABOVE},
+        category_orders={"position": ["Below national median",
+                                      "Above national median"]},
+    )
+    bars.update_traces(marker_line_width=0,
+                       hovertemplate="%{y}<br>%{x:+$,.0f} vs national<extra></extra>")
+    bars.update_layout(**theme.plotly_layout(520))
+    bars.add_vline(x=0, line_width=1, line_color=theme.NEUTRAL)
+    st.plotly_chart(bars, use_container_width=True)
+
+    with st.expander("Every program with published figures"):
+        table = frame[["program", "credential", "awards", "debt_median",
+                       "earnings_median", "debt_to_earnings",
+                       "earnings_national_median", "vs_national"]].copy()
+        table["debt_to_earnings"] = table["debt_to_earnings"].round(2)
+        st.dataframe(
+            table.rename(columns={
+                "program": "Program", "credential": "Credential",
+                "awards": "Awards", "debt_median": "Median debt ($)",
+                "earnings_median": "Median earnings ($)",
+                "debt_to_earnings": "Debt to earnings",
+                "earnings_national_median": "National median ($)",
+                "vs_national": "Difference ($)",
+            }).round(0),
+            hide_index=True, use_container_width=True, height=420,
+        )
+
+    st.info(
+        "**Most programs are missing from this view, and that is the data, "
+        "not a bug.** The Scorecard suppresses any figure drawn from a cohort "
+        "too small to publish without risking identification. Roughly four in "
+        "five program and credential rows nationally carry no earnings "
+        "figure. What is shown here is the institution's larger programs. "
+        "Earnings are measured five years after a student enters, not after "
+        "they graduate, and cover only graduates with federal aid who were "
+        "working and not enrolled."
     )
 
 
@@ -940,7 +1089,7 @@ def main() -> None:
 
     tabs = st.tabs([
         "Overview", "Budget allocation", "Peer comparison", "Opportunities",
-        "Reallocation planner", "Program mix", "Revenue",
+        "Reallocation planner", "Program mix", "Program returns", "Revenue",
     ])
     with tabs[0]:
         render_overview(unitid, summary, year)
@@ -955,6 +1104,8 @@ def main() -> None:
     with tabs[5]:
         render_programs(unitid)
     with tabs[6]:
+        render_returns(unitid)
+    with tabs[7]:
         render_revenue(unitid)
 
     render_footer()

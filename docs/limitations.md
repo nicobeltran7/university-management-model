@@ -23,10 +23,17 @@ one that implies it can do everything.
 - **Revenue is now complete for the GASB schedule.** All operating,
   nonoperating and capital or other addition lines in Part B are loaded, and
   shares use the reported total rather than a sum of the lines.
-- **No earnings or debt outcomes yet.** Graduate earnings by field of study
-  live in the College Scorecard, not IPEDS. Until that join is built, the
-  program mix view shows what an institution produces but not what those
-  graduates go on to earn.
+- **Most programs have no published earnings figure.** The Scorecard
+  suppresses any value drawn from a cohort too small to publish without
+  risking identification. Roughly four in five program-and-credential rows
+  nationally carry no earnings figure, so the Program returns view shows an
+  institution's larger programs, not all of them.
+- **Earnings are measured from entry, not from graduation,** five years after
+  a student enters the programme, and cover only graduates who received
+  federal aid and were working and not enrolled. They are not a placement
+  rate and they are not a salary survey.
+- **Debt is federal loan debt only.** Private loans, parental borrowing and
+  credit are not in the figure.
 - **The stress test is arithmetic, not behavioural.** It answers how much
   tuition per student would have to rise to replace lost state funding at
   fixed enrollment. It cannot say whether students would enrol at that price,
