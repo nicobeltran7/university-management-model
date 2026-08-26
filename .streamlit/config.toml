@@ -1,0 +1,15 @@
+# An explicit light theme. The chart palette was validated against this exact
+# surface colour for colour-vision deficiency separation and contrast, so the
+# app does not inherit the viewer's dark mode: a flipped background would
+# invalidate that work. See docs/design.md.
+
+[theme]
+base = "light"
+primaryColor = "#2a78d6"
+backgroundColor = "#fcfcfb"
+secondaryBackgroundColor = "#f4f4f1"
+textColor = "#12151a"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
