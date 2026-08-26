@@ -1,0 +1,29 @@
+# Raw source data is never committed. These are public federal files that
+# anyone can download from the IPEDS Data Center; committing them would make
+# the repository large without making it more verifiable.
+Data/
+*.duckdb
+
+# NOTE: the derived Parquet extracts live in extracts/ and ARE committed, at
+# about 1.3 MB. They must not live under a path that collides with the ignore
+# rule above. On a case-insensitive filesystem, which is the default on
+# Windows and macOS, "Data/" also matches "data/", and Git cannot re-include a
+# file whose parent directory is excluded. A negation such as
+# "!data/processed/*.parquet" silently does nothing. Hence extracts/.
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/secrets.toml
