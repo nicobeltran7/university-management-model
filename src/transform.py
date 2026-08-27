@@ -242,22 +242,39 @@ def revenue_mix(unitid: int) -> pd.DataFrame:
     return connect().execute(sql, [int(unitid)]).df()
 
 
-# Active named peer group, or None for the derived rule. Set once per run by
-# the interface. A module-level value is safe here because nothing downstream
-# of peer_set is cached, so changing it changes every dependent figure.
-_PEER_GROUP: str | None = None
-# Explicitly chosen comparison institutions. Takes precedence over a named
-# group, because an outright selection is a more specific instruction.
-_PEER_IDS: list[int] | None = None
+# The peer basis: an active named group, or explicitly chosen institutions,
+# or neither (the derived rule). Inside a running Streamlit app this state
+# MUST live in st.session_state, not at module level: Streamlit serves every
+# browser session from one process, so a module-level value written by one
+# viewer's rerun is read by another viewer mid-render, and the page ends up
+# describing a peer basis its own sidebar never selected. Outside Streamlit
+# (tests, scripts) a module-level dict plays the same role, one caller at a
+# time.
+_LOCAL_PEER_STATE: dict = {"group": None, "ids": None}
+
+
+def _peer_state() -> dict:
+    """The peer-basis store for the current context: per-session in a running
+    Streamlit app, module-level otherwise."""
+    try:
+        import streamlit as st
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        if get_script_run_ctx(suppress_warning=True) is not None:
+            if "_peer_state" not in st.session_state:
+                st.session_state["_peer_state"] = {"group": None, "ids": None}
+            return st.session_state["_peer_state"]
+    except Exception:
+        pass
+    return _LOCAL_PEER_STATE
 
 
 def set_peer_group(name: str | None) -> None:
     """Select a named statutory peer group, or None for the derived rule."""
-    global _PEER_GROUP, _PEER_IDS
     if name is not None and name not in config.PEER_PRESETS:
         raise ValueError(f"unknown peer group: {name!r}")
-    _PEER_GROUP = name
-    _PEER_IDS = None
+    state = _peer_state()
+    state["group"] = name
+    state["ids"] = None
 
 
 def set_peer_institutions(unitids: list[int] | None) -> None:
@@ -267,22 +284,23 @@ def set_peer_institutions(unitids: list[int] | None) -> None:
     question is rarely "show me my peer group" and often "how do we look
     against these two in particular".
     """
-    global _PEER_GROUP, _PEER_IDS
+    state = _peer_state()
     if not unitids:
-        _PEER_IDS = None
+        state["ids"] = None
         return
-    _PEER_IDS = [int(u) for u in unitids]
-    _PEER_GROUP = None
+    state["ids"] = [int(u) for u in unitids]
+    state["group"] = None
 
 
 def peer_institutions() -> list[int] | None:
     """The explicitly chosen comparison institutions, or None."""
-    return list(_PEER_IDS) if _PEER_IDS else None
+    ids = _peer_state()["ids"]
+    return list(ids) if ids else None
 
 
 def peer_group() -> str | None:
     """The active named peer group, or None."""
-    return _PEER_GROUP
+    return _peer_state()["group"]
 
 
 def peer_group_applies(unitid: int) -> bool:
@@ -293,20 +311,21 @@ def peer_group_applies(unitid: int) -> bool:
     derived rule takes over rather than producing a comparison nobody asked
     for.
     """
-    if _PEER_IDS:
+    state = _peer_state()
+    if state["ids"]:
         return False
-    if _PEER_GROUP is None:
+    if state["group"] is None:
         return False
-    return int(unitid) in config.PEER_PRESETS[_PEER_GROUP]
+    return int(unitid) in config.PEER_PRESETS[state["group"]]
 
 
 def peer_group_basis(unitid: int) -> str:
     """Human-readable description of the peer rule in force."""
-    chosen = [u for u in (_PEER_IDS or []) if int(u) != int(unitid)]
+    chosen = [u for u in (_peer_state()["ids"] or []) if int(u) != int(unitid)]
     if chosen:
         return f"Selected institutions ({len(chosen)})"
     if peer_group_applies(unitid):
-        return _PEER_GROUP
+        return _peer_state()["group"]
     return "Derived: same sector and level, FTE within 50 percent"
 
 
@@ -343,11 +362,12 @@ def peer_set(unitid: int, size_tolerance: float = 0.5) -> pd.DataFrame:
     When a statutory peer group is active and this institution belongs to it,
     that group is returned instead.
     """
-    chosen = [int(u) for u in (_PEER_IDS or []) if int(u) != int(unitid)]
+    state = _peer_state()
+    chosen = [int(u) for u in (state["ids"] or []) if int(u) != int(unitid)]
     if chosen:
         return _peer_frame(chosen)
     if peer_group_applies(unitid):
-        return _preset_peer_set(unitid, _PEER_GROUP)
+        return _preset_peer_set(unitid, state["group"])
     sql = """
         WITH target AS (
             SELECT i.UNITID, i.SECTOR, i.ICLEVEL, e.FTE12MN AS fte
