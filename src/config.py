@@ -36,6 +36,41 @@ FOCUS_UNITIDS = {
     225432: "University of Houston-Downtown",
 }
 
+# Statutory peer group. The Texas Higher Education Coordinating Board assigns
+# every public university to a peer group for accountability reporting, and
+# UHD sits in the Master's Universities group. Using the state's own grouping
+# matters: the comparison set is not the author's choice, so the result cannot
+# be dismissed as a peer list picked to flatter or to indict.
+#
+# Source: THECB, "Data Management & Research Institutional Peer Groups,
+# Public Universities FY 2026".
+# https://reportcenter.highered.texas.gov/reports/data/university-peer-group-categories/
+#
+# Two reconciliations between the THECB list and IPEDS, both deliberate:
+#  - THECB lists Sul Ross Rio Grande College as a separate member. It has no
+#    IPEDS UNITID of its own and is reported under Sul Ross State University,
+#    so the eleven THECB entries map to ten IPEDS institutions.
+#  - The institution THECB lists as University of Houston-Victoria became
+#    Texas A&M University-Victoria in August 2025, when the legislature moved
+#    it to the Texas A&M System. Same institution, same UNITID, new name.
+THECB_MASTERS_UNIVERSITIES = {
+    222831: "Angelo State University",
+    226833: "Midwestern State University",
+    228501: "Sul Ross State University",
+    483036: "Texas A&M University-Central Texas",
+    459949: "Texas A&M University-San Antonio",
+    224545: "Texas A&M University-Texarkana",
+    225502: "Texas A&M University-Victoria",
+    229018: "The University of Texas Permian Basin",
+    225432: "University of Houston-Downtown",
+    484905: "University of North Texas at Dallas",
+}
+
+# Named peer groups a reader can select instead of the derived rule.
+PEER_PRESETS = {
+    "THECB Master's Universities (Texas)": THECB_MASTERS_UNIVERSITIES,
+}
+
 # IPEDS Finance, public institutions reporting under GASB 34/35.
 # Part C: expenses and other deductions, current year total.
 EXPENSE_FUNCTIONS = {

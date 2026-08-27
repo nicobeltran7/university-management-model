@@ -66,8 +66,35 @@ def connect() -> duckdb.DuckDBPyConnection:
     return con
 
 
-def institution_list(state: str | None = None, sector: int | None = None) -> pd.DataFrame:
-    """Institutions available for selection, optionally filtered."""
+@functools.lru_cache(maxsize=1)
+def latest_fiscal_year() -> int:
+    """The most recent fiscal year present in the finance extract."""
+    row = connect().execute("SELECT max(fiscal_year) FROM finance").fetchone()
+    return int(row[0])
+
+
+def institution_list(state: str | None = None, sector: int | None = None,
+                     finance_only: bool = False) -> pd.DataFrame:
+    """Institutions available for selection, optionally filtered.
+
+    finance_only restricts the result to institutions this project can
+    currently describe, which is a narrower thing than having ever filed.
+    Three conditions, each of which removes a real source of confusion:
+
+      1. The institution filed expense data in the most recent fiscal year
+         loaded. An institution whose last filing was four years ago would
+         otherwise render as though the figures were current.
+      2. It has a record in the IPEDS directory, so it has a sector, level
+         and enrollment figure to be described by.
+      3. It is not an administrative unit (sector 0). System offices file
+         finance reports but enroll no students, so every per-FTE figure for
+         one is undefined and any comparison to a university is meaningless.
+
+    The finance survey here is the GASB 34/35 form, which only public
+    institutions file, so private institutions are absent throughout.
+    Offering a choice that produces an empty or stale screen spends the
+    reader's trust to save the author some work.
+    """
     clauses = ["INSTNM IS NOT NULL"]
     params: list = []
     if state:
@@ -76,6 +103,13 @@ def institution_list(state: str | None = None, sector: int | None = None) -> pd.
     if sector is not None:
         clauses.append("SECTOR = ?")
         params.append(sector)
+    if finance_only:
+        clauses.append(
+            "UNITID IN (SELECT UNITID FROM finance "
+            "WHERE fiscal_year = ? AND section = 'expense')"
+        )
+        params.append(latest_fiscal_year())
+        clauses.append("SECTOR <> 0")
     sql = f"""
         SELECT UNITID AS unitid, INSTNM AS name, CITY AS city, STABBR AS state,
                SECTOR AS sector, CONTROL AS control, INSTSIZE AS size_category
@@ -84,6 +118,37 @@ def institution_list(state: str | None = None, sector: int | None = None) -> pd.
         ORDER BY INSTNM
     """
     return connect().execute(sql, params).df()
+
+
+def sectors_present(finance_only: bool = True) -> pd.DataFrame:
+    """Sector codes available for selection, with a count and a label.
+
+    Used to group the institution picker, and filtered by the same rule as
+    institution_list so that the counts shown beside each sector match what
+    selecting it actually yields. Without the grouping, the picker mixes
+    research universities with cosmetology schools, which is accurate to the
+    IPEDS directory and useless to a reader.
+    """
+    where, params = "", []
+    if finance_only:
+        where = (
+            "WHERE UNITID IN (SELECT UNITID FROM finance "
+            "WHERE fiscal_year = ? AND section = 'expense') "
+            "AND SECTOR <> 0"
+        )
+        params = [latest_fiscal_year()]
+    sql = f"""
+        SELECT SECTOR AS sector, count(*) AS institutions
+        FROM institutions
+        {where}
+        GROUP BY SECTOR
+        ORDER BY institutions DESC
+    """
+    frame = connect().execute(sql, params).df()
+    frame["label"] = frame["sector"].map(
+        lambda s: config.SECTOR_LABELS.get(int(s), f"Sector {int(s)}")
+    )
+    return frame
 
 
 def expenses_by_function(unitid: int) -> pd.DataFrame:
@@ -127,6 +192,96 @@ def revenue_mix(unitid: int) -> pd.DataFrame:
     return connect().execute(sql, [int(unitid)]).df()
 
 
+# Active named peer group, or None for the derived rule. Set once per run by
+# the interface. A module-level value is safe here because nothing downstream
+# of peer_set is cached, so changing it changes every dependent figure.
+_PEER_GROUP: str | None = None
+# Explicitly chosen comparison institutions. Takes precedence over a named
+# group, because an outright selection is a more specific instruction.
+_PEER_IDS: list[int] | None = None
+
+
+def set_peer_group(name: str | None) -> None:
+    """Select a named statutory peer group, or None for the derived rule."""
+    global _PEER_GROUP, _PEER_IDS
+    if name is not None and name not in config.PEER_PRESETS:
+        raise ValueError(f"unknown peer group: {name!r}")
+    _PEER_GROUP = name
+    _PEER_IDS = None
+
+
+def set_peer_institutions(unitids: list[int] | None) -> None:
+    """Compare against these institutions specifically, or None to clear.
+
+    This is the mode an institutional research office actually works in. The
+    question is rarely "show me my peer group" and often "how do we look
+    against these two in particular".
+    """
+    global _PEER_GROUP, _PEER_IDS
+    if not unitids:
+        _PEER_IDS = None
+        return
+    _PEER_IDS = [int(u) for u in unitids]
+    _PEER_GROUP = None
+
+
+def peer_institutions() -> list[int] | None:
+    """The explicitly chosen comparison institutions, or None."""
+    return list(_PEER_IDS) if _PEER_IDS else None
+
+
+def peer_group() -> str | None:
+    """The active named peer group, or None."""
+    return _PEER_GROUP
+
+
+def peer_group_applies(unitid: int) -> bool:
+    """Whether the active group actually contains this institution.
+
+    A statutory group is only meaningful for its own members. Comparing an
+    Ohio university against the Texas Master's group would be nonsense, so the
+    derived rule takes over rather than producing a comparison nobody asked
+    for.
+    """
+    if _PEER_IDS:
+        return False
+    if _PEER_GROUP is None:
+        return False
+    return int(unitid) in config.PEER_PRESETS[_PEER_GROUP]
+
+
+def peer_group_basis(unitid: int) -> str:
+    """Human-readable description of the peer rule in force."""
+    chosen = [u for u in (_PEER_IDS or []) if int(u) != int(unitid)]
+    if chosen:
+        return f"Selected institutions ({len(chosen)})"
+    if peer_group_applies(unitid):
+        return _PEER_GROUP
+    return "Derived: same sector and level, FTE within 50 percent"
+
+
+def _peer_frame(ids: list[int]) -> pd.DataFrame:
+    """Directory and enrollment rows for an explicit list of institutions."""
+    if not ids:
+        return pd.DataFrame(columns=["unitid", "name", "state", "fte"])
+    placeholders = ", ".join("?" for _ in ids)
+    sql = f"""
+        SELECT i.UNITID AS unitid, i.INSTNM AS name, i.STABBR AS state,
+               e.FTE12MN AS fte
+        FROM institutions i
+        JOIN enrollment e USING (UNITID)
+        WHERE i.UNITID IN ({placeholders})
+        ORDER BY i.INSTNM
+    """
+    return connect().execute(sql, [int(i) for i in ids]).df()
+
+
+def _preset_peer_set(unitid: int, name: str) -> pd.DataFrame:
+    """The named group's members, excluding the target institution."""
+    ids = [int(i) for i in config.PEER_PRESETS[name] if int(i) != int(unitid)]
+    return _peer_frame(ids)
+
+
 def peer_set(unitid: int, size_tolerance: float = 0.5) -> pd.DataFrame:
     """Institutions comparable to the target on sector, level and size.
 
@@ -134,7 +289,15 @@ def peer_set(unitid: int, size_tolerance: float = 0.5) -> pd.DataFrame:
     sector, same institutional level, and full-time-equivalent enrollment
     within a tolerance band of the target. A transparent peer rule the reader
     can check beats a clever one they cannot.
+
+    When a statutory peer group is active and this institution belongs to it,
+    that group is returned instead.
     """
+    chosen = [int(u) for u in (_PEER_IDS or []) if int(u) != int(unitid)]
+    if chosen:
+        return _peer_frame(chosen)
+    if peer_group_applies(unitid):
+        return _preset_peer_set(unitid, _PEER_GROUP)
     sql = """
         WITH target AS (
             SELECT i.UNITID, i.SECTOR, i.ICLEVEL, e.FTE12MN AS fte
@@ -264,6 +427,47 @@ def opportunity_analysis(unitid: int, fiscal_year: int) -> pd.DataFrame:
     )
     frame["magnitude"] = frame["gap_per_fte"].abs()
     return frame.sort_values("magnitude", ascending=False).reset_index(drop=True)
+
+
+def headline_medians(unitid: int, fiscal_year: int) -> dict:
+    """Peer medians for the four header figures: FTE, headcount, total
+    expenses and total revenue.
+
+    Used to colour the header tiles by position. The colour encodes above or
+    below the peer median and nothing more; the interface says so, because
+    above-median spending is not a defect and below-median enrollment is not
+    an achievement.
+    """
+    peers = peer_set(unitid)
+    if peers.empty:
+        return {}
+    ids = [int(x) for x in peers["unitid"].tolist()]
+    placeholders = ", ".join("?" for _ in ids)
+    sql = f"""
+        WITH totals AS (
+            SELECT e.UNITID,
+                   any_value(e.FTE12MN) AS fte,
+                   any_value(e.UNDUP) AS headcount,
+                   max(CASE WHEN f.section = 'expense_total'
+                            THEN f.amount END) AS expenses,
+                   max(CASE WHEN f.section = 'revenue_total'
+                            AND f.line_item = 'Total all revenues and other additions'
+                            THEN f.amount END) AS revenue
+            FROM enrollment e
+            LEFT JOIN finance f
+              ON f.UNITID = e.UNITID AND f.fiscal_year = ?
+            WHERE e.UNITID IN ({placeholders})
+            GROUP BY e.UNITID
+        )
+        SELECT median(fte) AS fte, median(headcount) AS headcount,
+               median(expenses) AS expenses, median(revenue) AS revenue
+        FROM totals
+    """
+    row = connect().execute(sql, [int(fiscal_year)] + ids).df()
+    if row.empty:
+        return {}
+    out = row.iloc[0].to_dict()
+    return {k: (float(v) if pd.notna(v) else None) for k, v in out.items()}
 
 
 def peer_count(unitid: int) -> int:

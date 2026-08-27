@@ -72,6 +72,29 @@ div[data-testid="stMetricValue"] {
 }
 div[data-testid="stMetricDelta"] { font-size: 0.78rem !important; }
 
+/* Header stat tiles. The left border carries position against the peer
+   median: warm above, cool below, grey when no comparison exists. The hue
+   says above or below and nothing more. */
+.stat-tile {
+  background: #ffffff;
+  border: 1px solid #e4e3dd;
+  border-left-width: 4px;
+  border-radius: 10px;
+  padding: 14px 16px 12px 16px;
+  height: 100%;
+}
+.stat-tile .label {
+  font-size: 0.78rem; font-weight: 500; color: #5c6270;
+  letter-spacing: 0.01em; margin-bottom: 2px;
+}
+.stat-tile .value {
+  font-size: 1.65rem; font-weight: 600; letter-spacing: -0.02em;
+  color: #12151a; line-height: 1.2;
+}
+.stat-tile .versus {
+  font-size: 0.74rem; font-weight: 500; margin-top: 3px;
+}
+
 /* Tabs: give them weight so they read as navigation. */
 button[data-baseweb="tab"] {
   font-size: 0.95rem !important; font-weight: 500 !important;

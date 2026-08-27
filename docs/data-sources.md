@@ -31,9 +31,9 @@ recent year available lags the Fall components by one cycle.
 IPEDS collects institutional finance on three different schedules, because
 different institution types report under different accounting standards:
 
-- `_f1a` — public institutions under GASB 34/35
-- `_f2` — private nonprofit institutions under FASB
-- `_f3` — private for-profit institutions
+- `_f1a`: public institutions under GASB 34/35
+- `_f2`: private nonprofit institutions under FASB
+- `_f3`: private for-profit institutions
 
 **This project uses `_f1a` only.** The three schedules are not directly
 comparable: the line items differ, the definitions differ, and mixing them
@@ -133,8 +133,8 @@ Columns retained: `UNITID`, `CIPCODE`, `CIPDESC`, `CREDLEV`, `CREDDESC`,
 
 ## Not yet used
 
-- `f2223_f2`, `f2223_f3`, `f2324_f2`, `f2324_f3` — private nonprofit and
+- `f2223_f2`, `f2223_f3`, `f2324_f2`, `f2324_f3`: private nonprofit and
   for-profit finance schedules.
-- `effy2025` — 12-month unduplicated headcount by level and demographic.
+- `effy2025`: 12-month unduplicated headcount by level and demographic.
 - The 30 `MERGED` panel files in the Scorecard download, which carry
   institution-level series back to 1996.

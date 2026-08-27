@@ -1,4 +1,4 @@
-"""University Management Model — a data-driven view of institutional finance.
+"""University Management Model: a data-driven view of institutional finance.
 
 Streamlit application. Run with:  streamlit run streamlit_app.py
 
@@ -37,6 +37,32 @@ def eyebrow(text: str) -> None:
     st.markdown(f'<div class="eyebrow">{text}</div>', unsafe_allow_html=True)
 
 
+def stat_tile(label: str, value: str, target: float | None,
+              median: float | None) -> None:
+    """A header figure with its position against the peer median.
+
+    The border hue encodes above or below the median and nothing more. Above
+    is not worse and below is not better; the caption under the tiles says so.
+    """
+    if target is None or median is None or median == 0:
+        colour, versus = theme.NEUTRAL, "no peer comparison"
+    else:
+        gap = (target - median) / median
+        if abs(gap) < 0.005:
+            colour, versus = theme.NEUTRAL, "at the peer median"
+        elif gap > 0:
+            colour, versus = theme.ABOVE, f"{gap:+.0%} vs peer median"
+        else:
+            colour, versus = theme.BELOW, f"{gap:+.0%} vs peer median"
+    st.markdown(
+        f'<div class="stat-tile" style="border-left-color:{colour}">'
+        f'<div class="label">{label}</div>'
+        f'<div class="value">{value}</div>'
+        f'<div class="versus" style="color:{colour}">{versus}</div></div>',
+        unsafe_allow_html=True,
+    )
+
+
 def pct(value: float | None, places: int = 1) -> str:
     return "n/a" if value is None else f"{value:.{places}%}"
 
@@ -56,10 +82,15 @@ def _ready() -> bool:
 # --------------------------------------------------------------------------
 
 @st.cache_data
-def _all_institutions() -> pd.DataFrame:
-    frame = transform.institution_list()
-    frame["display"] = frame["name"] + "  ·  " + frame["state"].fillna("")
+def _all_institutions(sector: int | None = None) -> pd.DataFrame:
+    frame = transform.institution_list(sector=sector, finance_only=True)
+    frame["display"] = frame["name"] + "  \u00b7  " + frame["state"].fillna("")
     return frame
+
+
+@st.cache_data
+def _sectors() -> pd.DataFrame:
+    return transform.sectors_present(finance_only=True)
 
 
 def sidebar_selection() -> int:
@@ -71,18 +102,42 @@ def sidebar_selection() -> int:
     st.sidebar.markdown("---")
     st.sidebar.markdown("### Choose an institution")
 
-    named = list(config.FOCUS_UNITIDS.values())
-    frame = _all_institutions()
+    sectors = _sectors()
+    labels = {
+        f"{row.label}  ({int(row.institutions)})": int(row.sector)
+        for row in sectors.itertuples()
+    }
+    default_label = next(
+        (k for k, v in labels.items() if v == 1), list(labels)[0]
+    )
+    sector_label = st.sidebar.selectbox(
+        "Institution type", list(labels),
+        index=list(labels).index(default_label),
+        help="Only institutions with a current filing are listed: the "
+             "1,847 public institutions that reported expenses in the most "
+             "recent fiscal year loaded. Grouped by sector, so research "
+             "universities and trade schools are not mixed together in one "
+             "list. Coverage grows as further years and surveys are added.",
+    )
+    sector = labels[sector_label]
+
+    frame = _all_institutions(sector)
+    named = [
+        name for unitid, name in config.FOCUS_UNITIDS.items()
+        if unitid in set(int(u) for u in frame["unitid"])
+    ]
     options = named + [
         row for row in frame["display"].tolist()
         if not any(row.startswith(n) for n in named)
     ]
+    if not options:
+        st.sidebar.error("No institutions with finance data in this sector.")
+        st.stop()
 
     choice = st.sidebar.selectbox(
         "Search by name", options, index=0,
-        help="Start typing to search all 5,985 institutions in the IPEDS "
-             "directory. The two at the top are the sites described in the "
-             "proposed endeavor.",
+        help="Start typing to search. Any institution named in the proposed "
+             "endeavor appears at the top of its own sector.",
     )
 
     for unitid, name in config.FOCUS_UNITIDS.items():
@@ -91,30 +146,101 @@ def sidebar_selection() -> int:
     return int(frame.loc[frame["display"] == choice, "unitid"].iloc[0])
 
 
+def sidebar_peer_group(unitid: int) -> None:
+    """Choose the basis for every peer comparison in the application."""
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### Peer group")
+
+    derived = "Derived: sector, level and size"
+    chosen_label = "Choose institutions myself"
+    options = [derived] + list(config.PEER_PRESETS) + [chosen_label]
+    member_of = [
+        name for name, members in config.PEER_PRESETS.items()
+        if int(unitid) in members
+    ]
+    default = options.index(member_of[0]) if member_of else 0
+
+    choice = st.sidebar.radio(
+        "Comparison basis", options, index=default,
+        help="The derived rule matches on sector, institutional level and "
+             "FTE enrollment within 50 percent. A statutory group is the one "
+             "the state assigns for accountability reporting, so the peers "
+             "are not chosen by this tool. Choosing them yourself answers a "
+             "different question: how this institution looks against named "
+             "institutions in particular.",
+    )
+
+    if choice == chosen_label:
+        transform.set_peer_group(None)
+        frame = _all_institutions(None)
+        frame = frame[frame["unitid"] != int(unitid)]
+        lookup = dict(zip(frame["display"], frame["unitid"]))
+        picked = st.sidebar.multiselect(
+            "Compare against", list(lookup), max_selections=8,
+            help="Any institution that files the GASB 34/35 finance survey.",
+        )
+        ids = [int(lookup[p]) for p in picked]
+        transform.set_peer_institutions(ids)
+        if not ids:
+            st.sidebar.info(
+                "Pick at least one institution, or the derived rule applies."
+            )
+        elif len(ids) < 3:
+            st.sidebar.warning(
+                f"A median across {len(ids)} institution"
+                f"{'s' if len(ids) > 1 else ''} is not a distribution. "
+                "Read these as individual comparisons, not as a benchmark."
+            )
+        else:
+            st.sidebar.caption(f"Comparing against {len(ids)} chosen institutions.")
+        return
+
+    transform.set_peer_institutions(None)
+    name = None if choice == derived else choice
+    transform.set_peer_group(name)
+
+    if name and not transform.peer_group_applies(unitid):
+        st.sidebar.warning(
+            "The selected institution is not a member of that group, so the "
+            "derived rule is in use for it."
+        )
+    elif name:
+        st.sidebar.caption(
+            f"Comparing against the {len(config.PEER_PRESETS[name]) - 1} other "
+            "members of the group the state assigns this institution."
+        )
+
+
 def sidebar_reference() -> None:
     st.sidebar.markdown("---")
     with st.sidebar.expander("What the terms mean"):
         st.markdown(
-            "**FTE** — full-time equivalent. Part-time students counted as "
+            "**FTE**: full-time equivalent. Part-time students counted as "
             "fractions of a full-time one, so institutions with different "
             "enrollment patterns are comparable.\n\n"
-            "**Per FTE** — a total divided by FTE enrollment. A large "
+            "**Per FTE**: a total divided by FTE enrollment. A large "
             "university spends more on teaching than a small one by "
             "definition; per-student figures make the comparison mean "
             "something.\n\n"
-            "**Institutional support** — the IPEDS term for administration. "
+            "**Institutional support**: the IPEDS term for administration. "
             "Executive management, legal, fiscal operations, public "
             "relations.\n\n"
-            "**Academic support** — libraries, museums, academic "
+            "**Academic support**: libraries, museums, academic "
             "computing, curriculum development. Support *for* teaching "
             "rather than teaching itself.\n\n"
-            "**GASB 34/35** — the accounting standard public institutions "
+            "**GASB 34/35**: the accounting standard public institutions "
             "report under. Private institutions use a different one, which "
             "is why they are not included here.\n\n"
-            "**CIP code** — Classification of Instructional Programs, the "
+            "**CIP code**: Classification of Instructional Programs, the "
             "federal taxonomy of fields of study.\n\n"
-            "**Peer group** — institutions of the same sector and level "
-            "whose FTE enrollment is within 50 percent of this one's."
+            "**Peer group**: by default, institutions of the same sector "
+            "and level whose FTE enrollment is within 50 percent of this "
+            "one's. A statutory group can be selected instead, in which case "
+            "the peers are the ones the state assigns rather than any this "
+            "tool chose.\n\n"
+            "**THECB**: the Texas Higher Education Coordinating Board, which "
+            "assigns every Texas public university to a peer group for "
+            "accountability reporting."
         )
     st.sidebar.caption(
         "Source: IPEDS, U.S. Department of Education. Public domain. "
@@ -144,19 +270,41 @@ def render_header(unitid: int) -> tuple[dict, int | None]:
     expenses = transform.expenses_by_function(unitid)
     year = int(expenses["fiscal_year"].max()) if not expenses.empty else None
 
+    medians = transform.headline_medians(unitid, year) if year else {}
+    fte = summary.get("fte")
+    headcount = summary.get("headcount")
+
     columns = st.columns(4)
-    columns[0].metric("Students (FTE)", f"{summary.get('fte') or 0:,.0f}")
-    columns[1].metric("Headcount", f"{summary.get('headcount') or 0:,.0f}")
+    with columns[0]:
+        stat_tile("Students (FTE)", f"{fte or 0:,.0f}",
+                  fte, medians.get("fte"))
+    with columns[1]:
+        stat_tile("Headcount", f"{headcount or 0:,.0f}",
+                  headcount, medians.get("headcount"))
     if year:
         total = expenses.loc[expenses["fiscal_year"] == year,
                              "total_expenses"].iloc[0]
-        columns[2].metric(f"Expenses, FY{year}", short(total))
         position = transform.revenue_position(unitid, year)
-        columns[3].metric(f"Revenue, FY{year}",
-                          short(position.get("total_revenue")))
+        revenue = position.get("total_revenue")
+        with columns[2]:
+            stat_tile(f"Expenses, FY{year}", short(total),
+                      float(total), medians.get("expenses"))
+        with columns[3]:
+            stat_tile(f"Revenue, FY{year}", short(revenue),
+                      float(revenue) if revenue is not None else None,
+                      medians.get("revenue"))
     else:
-        columns[2].metric("Expenses", "not reported")
-        columns[3].metric("Revenue", "not reported")
+        with columns[2]:
+            stat_tile("Expenses", "not reported", None, None)
+        with columns[3]:
+            stat_tile("Revenue", "not reported", None, None)
+    st.caption(
+        f"Position against the median of the current peer basis: "
+        f"{transform.peer_group_basis(unitid)}. Warm means above the peer "
+        "median, cool means below. Neither is a verdict: above-median "
+        "spending is not a defect and below-median enrollment is not an "
+        "achievement."
+    )
     return summary, year
 
 
@@ -1082,6 +1230,7 @@ def main() -> None:
     _ready()
 
     unitid = sidebar_selection()
+    sidebar_peer_group(unitid)
     sidebar_reference()
 
     summary, year = render_header(unitid)
