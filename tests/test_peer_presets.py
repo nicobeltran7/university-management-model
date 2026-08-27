@@ -212,3 +212,10 @@ def test_headline_medians_follow_the_peer_basis():
     derived = transform.headline_medians(UHD, year)
     assert statutory and derived
     assert statutory != derived
+
+
+def test_headline_medians_include_enrollment_intensity():
+    year = transform.latest_fiscal_year()
+    medians = transform.headline_medians(UHD, year)
+    assert "intensity" in medians
+    assert medians["intensity"] is None or 0 < medians["intensity"] <= 1.5

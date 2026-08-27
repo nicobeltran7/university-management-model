@@ -233,6 +233,10 @@ def sidebar_reference() -> None:
             "is why they are not included here.\n\n"
             "**CIP code**: Classification of Instructional Programs, the "
             "federal taxonomy of fields of study.\n\n"
+            "**Enrollment intensity**: FTE divided by headcount. Near "
+            "100% means a mostly full-time student body; lower means more "
+            "part-time students, which stretches the same headcount over "
+            "fewer full-time equivalents.\n\n"
             "**Peer group**: by default, institutions of the same sector "
             "and level whose FTE enrollment is within 50 percent of this "
             "one's. A statutory group can be selected instead, in which case "
@@ -274,13 +278,19 @@ def render_header(unitid: int) -> tuple[dict, int | None]:
     fte = summary.get("fte")
     headcount = summary.get("headcount")
 
-    columns = st.columns(4)
+    intensity = (fte / headcount) if fte and headcount else None
+
+    columns = st.columns(5)
     with columns[0]:
         stat_tile("Students (FTE)", f"{fte or 0:,.0f}",
                   fte, medians.get("fte"))
     with columns[1]:
         stat_tile("Headcount", f"{headcount or 0:,.0f}",
                   headcount, medians.get("headcount"))
+    with columns[4]:
+        stat_tile("Enrollment intensity",
+                  f"{intensity:.0%}" if intensity else "n/a",
+                  intensity, medians.get("intensity"))
     if year:
         total = expenses.loc[expenses["fiscal_year"] == year,
                              "total_expenses"].iloc[0]
@@ -303,7 +313,10 @@ def render_header(unitid: int) -> tuple[dict, int | None]:
         f"{transform.peer_group_basis(unitid)}. Warm means above the peer "
         "median, cool means below. Neither is a verdict: above-median "
         "spending is not a defect and below-median enrollment is not an "
-        "achievement."
+        "achievement. Enrollment intensity is FTE divided by headcount: "
+        "near 100% means a mostly full-time student body, lower means more "
+        "part-time students, and it is the single strongest reason "
+        "per-student comparisons need care."
     )
     return summary, year
 

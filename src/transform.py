@@ -460,6 +460,7 @@ def headline_medians(unitid: int, fiscal_year: int) -> dict:
             GROUP BY e.UNITID
         )
         SELECT median(fte) AS fte, median(headcount) AS headcount,
+               median(fte / NULLIF(headcount, 0)) AS intensity,
                median(expenses) AS expenses, median(revenue) AS revenue
         FROM totals
     """

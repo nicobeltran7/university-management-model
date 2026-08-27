@@ -166,7 +166,9 @@ def plotly_layout(height: int = 420, legend: bool = True) -> dict:
     """Shared layout: recessive grid and axes, ink-coloured text, no chartjunk."""
     return dict(
         height=height,
-        margin=dict(l=0, r=10, t=8, b=0),
+        # A legend drawn above the plot needs headroom in the top margin, or
+        # it overlaps the first bar. 8px was enough only for legendless charts.
+        margin=dict(l=0, r=10, t=44 if legend else 8, b=0),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(family="Inter, system-ui, sans-serif", size=12, color=INK),

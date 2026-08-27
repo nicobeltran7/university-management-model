@@ -86,6 +86,17 @@ In every mode, functions the target institution does not report are excluded
 from the comparison, and the header tiles colour position against the peer
 median of whichever basis is in force.
 
+### Enrollment intensity
+
+FTE divided by unduplicated 12-month headcount. Near 100% means a mostly
+full-time student body; lower means more part-time students. It is reported in
+the header, with position against the peer median, because it is the single
+strongest reason per-student spending comparisons need care: two institutions
+with the same headcount can differ by a third or more in the full-time
+equivalents that per-FTE figures divide by. This is the first step of planned
+enrollment-composition coverage; student demographics by race, gender and age
+live in the IPEDS EFFY survey, which is not yet ingested.
+
 ### Revenue exposure ratios
 
 ```
