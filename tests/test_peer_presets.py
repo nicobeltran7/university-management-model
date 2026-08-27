@@ -219,3 +219,11 @@ def test_headline_medians_include_enrollment_intensity():
     medians = transform.headline_medians(UHD, year)
     assert "intensity" in medians
     assert medians["intensity"] is None or 0 < medians["intensity"] <= 1.5
+
+
+def test_revenue_benchmarks_cover_gifts_and_auxiliary():
+    year = transform.latest_fiscal_year()
+    marks = transform.peer_revenue_benchmarks(UHD, year)
+    assert {"gifts_per_fte", "auxiliary_share"} <= set(marks)
+    pos = transform.revenue_position(UHD, year)
+    assert "gifts_per_fte" in pos and "auxiliary_share" in pos

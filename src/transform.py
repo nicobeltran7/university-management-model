@@ -525,7 +525,11 @@ def revenue_position(unitid: int, fiscal_year: int) -> dict:
           max(CASE WHEN line_item = 'Tuition and fees, net of discounts'
                    THEN amount END)                                AS tuition,
           max(CASE WHEN line_item = 'State appropriations'
-                   THEN amount END)                                AS state_appropriations
+                   THEN amount END)                                AS state_appropriations,
+          max(CASE WHEN line_item = 'Gifts and contributions'
+                   THEN amount END)                                AS gifts,
+          max(CASE WHEN line_item = 'Sales and services of auxiliary enterprises'
+                   THEN amount END)                                AS auxiliary
         FROM finance
         WHERE UNITID = ? AND fiscal_year = ?
     """
@@ -548,11 +552,17 @@ def revenue_position(unitid: int, fiscal_year: int) -> dict:
     enrolled = fte(unitid)
     out["fte"] = enrolled
     out["revenue_per_fte"] = total / enrolled if total and enrolled else None
+    out["gifts_per_fte"] = (
+        out["gifts"] / enrolled if enrolled and out.get("gifts") else None
+    )
+    out["auxiliary_share"] = (
+        out["auxiliary"] / total if total and out.get("auxiliary") else None
+    )
     return out
 
 
 def peer_revenue_benchmarks(unitid: int, fiscal_year: int) -> dict:
-    """Peer median tuition dependence, state share and revenue per FTE."""
+    """Peer medians: tuition dependence, state share, revenue and gifts per FTE, auxiliary share."""
     unitid = int(unitid)
     peers = peer_set(unitid)
     if peers.empty:
@@ -569,6 +579,10 @@ def peer_revenue_benchmarks(unitid: int, fiscal_year: int) -> dict:
                        THEN f.amount END) AS tuition,
               max(CASE WHEN f.line_item = 'State appropriations'
                        THEN f.amount END) AS state_appropriations,
+              max(CASE WHEN f.line_item = 'Gifts and contributions'
+                       THEN f.amount END) AS gifts,
+              max(CASE WHEN f.line_item = 'Sales and services of auxiliary enterprises'
+                       THEN f.amount END) AS auxiliary,
               max(e.FTE12MN)              AS fte
             FROM finance f
             JOIN enrollment e USING (UNITID)
@@ -577,7 +591,9 @@ def peer_revenue_benchmarks(unitid: int, fiscal_year: int) -> dict:
         )
         SELECT median(tuition / NULLIF(total_revenue, 0))              AS tuition_dependence,
                median(state_appropriations / NULLIF(total_revenue, 0)) AS state_share,
-               median(total_revenue / NULLIF(fte, 0))                  AS revenue_per_fte
+               median(total_revenue / NULLIF(fte, 0))                  AS revenue_per_fte,
+               median(gifts / NULLIF(fte, 0))                          AS gifts_per_fte,
+               median(auxiliary / NULLIF(total_revenue, 0))            AS auxiliary_share
         FROM base
         WHERE total_revenue > 0 AND fte > 0
     """

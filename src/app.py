@@ -1097,27 +1097,42 @@ def render_revenue(unitid: int) -> None:
     columns[3].metric("Revenue per student",
                       money(position.get("revenue_per_fte")))
 
-    st.markdown("**Exposure**")
+    st.markdown("**Exposure and mix against peers**")
     st.caption(
-        "The two ratios a public institution's finance office watches. "
         "Tuition dependence is exposure to an enrollment decline. State "
-        "share is exposure to a state budget decision."
+        "share is exposure to a state budget decision. Gifts per student and "
+        "auxiliary share describe how much revenue comes from outside the "
+        "tuition-and-appropriations core. Every comparison uses the peer "
+        "basis chosen in the sidebar, and none of it is a verdict: this view "
+        "shows where the institution sits, not where revenue could be found."
     )
-    left, right = st.columns(2)
-    for column, key, label in (
-        (left, "tuition_dependence", "Tuition as a share of revenue"),
-        (right, "state_share", "State appropriations as a share of revenue"),
+    cells = st.columns(4)
+    for column, key, label, kind in (
+        (cells[0], "tuition_dependence", "Tuition share of revenue", "pct"),
+        (cells[1], "state_share", "State appropriations share", "pct"),
+        (cells[2], "gifts_per_fte", "Gifts per student", "money"),
+        (cells[3], "auxiliary_share", "Auxiliary share of revenue", "pct"),
     ):
         value, peer = position.get(key), benchmarks.get(key)
         if value is None:
             column.metric(label, "not reported")
+            if peer is not None:
+                fmt = pct(peer) if kind == "pct" else money(peer)
+                column.caption(f"Peer median: {fmt}")
             continue
-        delta = None
+        if kind == "pct":
+            shown = pct(value)
+            delta = (f"{(value - peer) * 100:+.1f} pts vs peer median"
+                     if peer is not None else None)
+        else:
+            shown = money(value)
+            delta = (f"{value - peer:+,.0f} vs peer median"
+                     if peer is not None else None)
+        column.metric(label, shown, delta=delta, delta_color="off")
         if peer is not None:
-            delta = f"{(value - peer) * 100:+.1f} pts vs peer median"
-        column.metric(label, pct(value), delta=delta, delta_color="off")
-        if peer is not None:
-            column.caption(f"Peer median: {pct(peer)}")
+            column.caption(
+                f"Peer median: {pct(peer) if kind == 'pct' else money(peer)}"
+            )
 
     st.markdown("**Composition**")
     composition = px.treemap(
