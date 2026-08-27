@@ -122,7 +122,12 @@ div[data-testid="stCaptionContainer"] p {
 .eyebrow {
   font-size: 0.72rem; font-weight: 600; letter-spacing: 0.09em;
   text-transform: uppercase; color: #2a78d6; margin-bottom: 2px;
+  /* Without an explicit line-height the container computes a height smaller
+     than the glyphs and clips them at the bottom. */
+  line-height: 1.6; padding-bottom: 2px; overflow: visible;
 }
+/* Streamlit can clip custom HTML blocks to their computed height. */
+div[data-testid="stMarkdownContainer"] { overflow: visible; }
 
 .subtitle { color: #5c6270; font-size: 0.95rem; margin-bottom: 0.2rem; }
 
