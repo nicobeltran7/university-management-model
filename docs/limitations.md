@@ -9,9 +9,10 @@ one that implies it can do everything.
   schedule (`_f1a`). Private nonprofit and for-profit institutions report on
   different schedules with different line items, and combining them without a
   documented crosswalk would produce comparisons that are wrong.
-- **Two fiscal years.** 2023 and 2024. Enough to show direction, not enough to
-  establish a trend. More years are a download away and the ingest handles them
-  without code changes.
+- **Five fiscal years.** 2020 through 2024. Enough to show a trend through the
+  pandemic period and out of it, though still short of a full economic cycle.
+  Earlier years are a download away and the ingest handles them without code
+  changes.
 - **Fiscal 2024 is provisional.** It may be revised by NCES. Charts label the
   fiscal year so the reader knows which release they are seeing.
 

@@ -45,13 +45,15 @@ change = (current - prior) / prior
 
 Returns a fraction. Null if either year is missing or the prior year is zero.
 
-Two fiscal years are currently loaded, 2023 and 2024. Note that 2024 is a
-provisional release and may be revised. The application labels the year on
+Five fiscal years are currently loaded, 2020 through 2024. Note that 2024 is
+a provisional release and may be revised. The application labels the year on
 every chart so a reader always knows which release they are looking at.
 
 ### Peer set
 
-An institution is a peer if it has:
+Three bases are available, and the one in force is always stated on screen.
+
+**Derived (the default).** An institution is a peer if it has:
 
 - the same IPEDS `SECTOR`, and
 - the same IPEDS `ICLEVEL`, and
@@ -65,6 +67,24 @@ This rule is deliberately crude. It does not account for research intensity,
 urbanicity, whether the institution operates a hospital, or state funding
 regime, all of which legitimately drive spending differences. It is a starting
 comparison, not a verdict, and the application says so on the page.
+
+**Statutory.** A peer group defined by a state agency rather than by this
+tool. The one implemented is the Texas Higher Education Coordinating Board's
+Master's Universities group (*Institutional Peer Groups, Public Universities
+FY 2026*), which applies to its ten member institutions and to nothing else:
+selecting it for a non-member falls back to the derived rule, with a notice.
+The value of a statutory group is precisely that the author did not choose
+it. The membership list, and two documented reconciliations between the THECB
+list and the IPEDS directory, live in `src/config.py`.
+
+**Chosen.** The reader selects up to eight institutions by name and every
+comparison runs against exactly those. Below three selections the application
+warns that a median across so few institutions is not a distribution and
+should be read as individual comparisons.
+
+In every mode, functions the target institution does not report are excluded
+from the comparison, and the header tiles colour position against the peer
+median of whichever basis is in force.
 
 ### Revenue exposure ratios
 

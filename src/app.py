@@ -1211,7 +1211,7 @@ def render_footer() -> None:
         "Data: Integrated Postsecondary Education Data System (IPEDS), "
         "National Center for Education Statistics, U.S. Department of "
         "Education. Public domain.<br>"
-        "Finance and revenue: fiscal years 2023 and 2024, GASB 34/35 "
+        "Finance and revenue: fiscal years 2020 through 2024, GASB 34/35 "
         "schedule. Directory, enrollment and completions: 2025 collection. "
         "FY2024 is a provisional release and may be revised.<br>"
         "No figure in this application is estimated, simulated or projected. "
