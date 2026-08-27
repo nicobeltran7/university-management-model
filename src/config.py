@@ -71,6 +71,14 @@ PEER_PRESETS = {
     "THECB Master's Universities (Texas)": THECB_MASTERS_UNIVERSITIES,
 }
 
+# URL slugs for the peer bases, so a view can be linked to. The slug appears
+# in the address bar (?peers=thecb-masters-tx) and must stay stable once
+# published, because a changed slug silently breaks every link already sent.
+PEER_PRESET_SLUGS = {
+    "thecb-masters-tx": "THECB Master's Universities (Texas)",
+}
+PEER_PRESET_TO_SLUG = {name: slug for slug, name in PEER_PRESET_SLUGS.items()}
+
 # IPEDS Finance, public institutions reporting under GASB 34/35.
 # Part C: expenses and other deductions, current year total.
 EXPENSE_FUNCTIONS = {
@@ -191,6 +199,21 @@ FINANCE_FILES = {
     2022: "f2122_f1a_rv.csv",  # revised
     2023: "f2223_f1a_rv.csv",  # revised
     2024: "f2324_f1a.csv",     # provisional, may be revised by NCES
+}
+
+# Derived 12-month enrollment, one file per fiscal year, matching the finance
+# years above. DRVEF12 for a collection year covers the twelve months ending
+# June of that year, so the 2024 file is the denominator for fiscal 2024.
+# Optional: when these files are absent the extract is not written and every
+# per-student figure divides by the latest snapshot instead, which the
+# interface discloses. Download from the IPEDS data center alongside the
+# finance files (DRVEF122020.zip through DRVEF122024.zip).
+ENROLLMENT_YEAR_FILES = {
+    2020: "drvef122020.csv",
+    2021: "drvef122021.csv",
+    2022: "drvef122022.csv",
+    2023: "drvef122023.csv",
+    2024: "drvef122024.csv",
 }
 
 

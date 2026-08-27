@@ -27,6 +27,19 @@ alone are not comparable across institutions: a large university spends more on
 instruction than a small one by definition. Per-FTE puts institutions of
 different sizes on the same axis.
 
+The denominator is matched to the fiscal year when the per-year enrollment
+extract is loaded: each year's dollars divide by that year's own DRVEF12
+figure, with the latest snapshot as the fallback for any institution and year
+the extract does not cover. When the per-year files have not been ingested at
+all, one snapshot serves every year, and then two consequences follow.
+Movement in a per-FTE series across years is movement in spending, not in
+enrollment. And at an institution whose enrollment changed materially over
+the period, the historical per-student levels carry that distortion: a
+shrinking institution's earlier years read higher per student than they were
+at the time. The application states which case is in force in the five-year
+grid's caption, and the position-over-time panel appears only when the
+denominators are year-matched, because without them it would not be a trend.
+
 ### Share of total expenses
 
 ```

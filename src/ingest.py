@@ -56,6 +56,50 @@ def ingest_enrollment(con: duckdb.DuckDBPyConnection) -> int:
     return con.execute(f"SELECT count(*) FROM read_parquet({_quoted(out)})").fetchone()[0]
 
 
+def ingest_enrollment_years(con: duckdb.DuckDBPyConnection) -> int:
+    """Per-year 12-month enrollment, matched to the finance fiscal years.
+
+    Optional. When none of the DRVEF12 files are present the extract is not
+    written, and every per-student figure falls back to the latest snapshot,
+    which the application discloses. Years found are loaded; years missing
+    are skipped with a note, so a partial download still improves coverage.
+    """
+    con.execute(
+        "CREATE OR REPLACE TEMP TABLE enrollment_years_long "
+        "(UNITID BIGINT, fiscal_year INTEGER, fte DOUBLE, headcount DOUBLE)"
+    )
+    loaded = 0
+    for fy, filename in sorted(config.ENROLLMENT_YEAR_FILES.items()):
+        src = config.RAW_IPEDS / filename
+        if not src.exists():
+            print(f"  enrollment_years: skipping FY{fy}, {filename} not found",
+                  file=sys.stderr)
+            continue
+        con.execute(
+            f"""
+            INSERT INTO enrollment_years_long
+            SELECT UNITID, {fy} AS fiscal_year,
+                   TRY_CAST(FTE12MN AS DOUBLE) AS fte,
+                   TRY_CAST(UNDUP AS DOUBLE)   AS headcount
+            FROM read_csv_auto({_quoted(src)}, header=true, ignore_errors=true)
+            WHERE UNITID IS NOT NULL
+            """
+        )
+        loaded += 1
+    if not loaded:
+        print("      enrollment_years: no DRVEF12 files found, skipping",
+              file=sys.stderr)
+        return 0
+    out = config.PROCESSED / "enrollment_years.parquet"
+    con.execute(
+        f"COPY (SELECT * FROM enrollment_years_long) "
+        f"TO {_quoted(out)} (FORMAT PARQUET)"
+    )
+    return con.execute(
+        f"SELECT count(*) FROM read_parquet({_quoted(out)})"
+    ).fetchone()[0]
+
+
 def ingest_finance(con: duckdb.DuckDBPyConnection) -> int:
     """Finance, public institutions under GASB, unpivoted to long form.
 
@@ -232,6 +276,7 @@ def main() -> None:
         ("institutions", ingest_directory),
         ("enrollment", ingest_enrollment),
         ("finance", ingest_finance),
+        ("enrollment_years", ingest_enrollment_years),
         ("completions", ingest_completions),
         ("programs", ingest_programs),
     ]

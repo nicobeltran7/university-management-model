@@ -27,3 +27,6 @@ Thumbs.db
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local working notes, not part of the project.
+COMMIT_PLAN.md

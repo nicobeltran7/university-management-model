@@ -18,6 +18,20 @@ U.S. Department of Education. Nothing is estimated, simulated or invented.
 | **Program mix** | What does the institution actually produce, by field of study? |
 | **Program returns** | What do those graduates earn, what did they borrow, and how does that compare to the same programme nationally? |
 | **Revenue** | Where does the operating money come from? |
+| **Compare** | How do two named institutions look on the same figures, side by side? |
+
+Three things travel out of the application. Every table has a CSV download.
+The header has a one-page institutional brief, a self-contained HTML file
+that prints to PDF, carrying the headline figures, the spending position
+against the current peer basis, and revenue exposure. And the address bar
+always encodes the current view, institution and peer basis both, so copying
+the URL shares exactly what is on screen; `?unitid=225432&peers=thecb-masters-tx`
+opens the University of Houston-Downtown against its statutory Texas peer
+group. When the per-year enrollment files are loaded (see
+`docs/data-sources.md`), per-student figures divide each fiscal year by that
+year's own enrollment and the Peer comparison view adds a position-over-time
+panel; without them the application falls back to the latest snapshot and
+says so.
 
 The last two views are the point of the project. Reporting what an institution
 spends is description. Naming the gaps in dollars, and letting someone test a

@@ -22,6 +22,17 @@ an `_rv` suffix is the revised version and should be preferred.
 Place them in `Data/Finance Data/`. The paths are declared in `src/config.py`
 and nowhere else.
 
+### Optional: per-year enrollment denominators
+
+The derived-variables file for each fiscal year lets every per-student figure
+divide by that year's own enrollment instead of one snapshot, which is what
+makes a per-student trend a trend. Download `DRVEF122020.zip` through
+`DRVEF122024.zip` from the same Complete Data Files page, unzip, and place the
+CSVs (`drvef122020.csv` ... `drvef122024.csv`) beside the finance files, then
+rerun the ingest. Missing years are skipped, so a partial set still improves
+coverage; with none present the application falls back to the snapshot and
+says so.
+
 Note the naming convention: `f2324_f1a` holds fiscal year 2024 data collected
 in the 2023-24 cycle. Finance is a Spring collection component, so the most
 recent year available lags the Fall components by one cycle.

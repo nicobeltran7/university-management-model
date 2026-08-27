@@ -15,6 +15,14 @@ one that implies it can do everything.
   changes.
 - **Fiscal 2024 is provisional.** It may be revised by NCES. Charts label the
   fiscal year so the reader knows which release they are seeing.
+- **Per-student denominators depend on which enrollment files are loaded.**
+  With the per-year DRVEF12 files ingested, each fiscal year divides by its
+  own enrollment. Without them, every year divides by the latest snapshot, a
+  five-year per-student trend is really a spending trend at fixed enrollment,
+  and historical per-student levels are distorted wherever enrollment moved
+  materially. The application discloses which case is in force, and hides the
+  position-over-time panel in the snapshot case rather than showing a trend
+  that is not one.
 
 ## What the data cannot answer
 
@@ -40,8 +48,8 @@ one that implies it can do everything.
   fixed enrollment. It cannot say whether students would enrol at that price,
   because that requires a demand elasticity IPEDS does not contain.
 - **Program mix says nothing about program quality or return.** It reports how
-  many awards were conferred in each field. Earnings and debt by field live in
-  the College Scorecard and are not yet joined.
+  many awards were conferred in each field. Earnings and debt by field are in
+  the Program returns view, from the College Scorecard, where published.
 - **No student-level anything.** IPEDS is institution-level aggregate data.
   Nothing here can say anything about an individual student.
 - **Reporting is self-reported.** Institutions file their own figures.
@@ -60,10 +68,7 @@ one that implies it can do everything.
 
 In rough order of value:
 
-1. Join College Scorecard field-of-study earnings and debt to the program mix,
-   by CIP code, so program output can be read against program outcome.
+1. Load per-year enrollment so per-student figures use the matching year.
 2. Load more fiscal years of Finance to turn direction into trend.
 3. Add the FASB schedule with a documented crosswalk, extending coverage to
    private nonprofit institutions.
-4. Add a scenario model, with every assumption exposed as an input and its
-   sensitivity shown.

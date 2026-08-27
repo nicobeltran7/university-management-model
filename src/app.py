@@ -14,7 +14,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from src import config, theme, transform
+from src import brief, config, theme, transform
 
 st.set_page_config(
     page_title="University Management Model",
@@ -71,10 +71,73 @@ money = theme.exact_money
 short = theme.compact_money
 
 
+def data_table(frame: pd.DataFrame, filename: str, key: str, **kwargs) -> None:
+    """A table with its own CSV download.
+
+    Institutional research offices work in spreadsheets, so every table in
+    the application can leave as one. The file carries exactly the columns
+    the table shows.
+    """
+    st.dataframe(frame, **kwargs)
+    st.download_button(
+        "Download CSV", frame.to_csv(index=False).encode("utf-8"),
+        file_name=filename, mime="text/csv", key=key,
+    )
+
+
 @st.cache_resource
 def _ready() -> bool:
     transform.connect()
     return True
+
+
+# --------------------------------------------------------------------------
+# Shareable URLs
+# --------------------------------------------------------------------------
+# The address bar always encodes the current view: institution and peer
+# basis. Copying the URL therefore shares the view, which is how a reader
+# sends a colleague exactly what they are looking at. Parameters are read
+# once per browser session and applied as widget defaults; after that the
+# widgets own the state and the URL follows them.
+
+def _url_state() -> dict:
+    """The URL parameters this session arrived with, read once."""
+    if "_url_state" in st.session_state:
+        return st.session_state["_url_state"]
+    params = st.query_params
+    state: dict = {}
+    unitid = params.get("unitid")
+    if unitid and str(unitid).isdigit():
+        state["unitid"] = int(unitid)
+    peers = params.get("peers")
+    if peers in ("derived", "chosen") or peers in config.PEER_PRESET_SLUGS:
+        state["peers"] = peers
+    ids = params.get("peer_ids")
+    if ids:
+        state["peer_ids"] = [
+            int(x) for x in str(ids).split(",") if x.strip().isdigit()
+        ]
+    st.session_state["_url_state"] = state
+    return state
+
+
+def _write_url(unitid: int) -> None:
+    """Reflect the current view into the address bar."""
+    st.query_params["unitid"] = str(int(unitid))
+    chosen = transform.peer_institutions()
+    group = transform.peer_group()
+    if chosen:
+        st.query_params["peers"] = "chosen"
+        st.query_params["peer_ids"] = ",".join(str(i) for i in chosen)
+    else:
+        if "peer_ids" in st.query_params:
+            del st.query_params["peer_ids"]
+        if group:
+            st.query_params["peers"] = config.PEER_PRESET_TO_SLUG.get(
+                group, "derived"
+            )
+        else:
+            st.query_params["peers"] = "derived"
 
 
 # --------------------------------------------------------------------------
@@ -110,6 +173,23 @@ def sidebar_selection() -> int:
     default_label = next(
         (k for k, v in labels.items() if v == 1), list(labels)[0]
     )
+
+    # A unitid in the URL selects that institution's sector and name as the
+    # defaults, so a shared link opens on the view the sender was looking at.
+    url_row = None
+    url_unitid = _url_state().get("unitid")
+    if url_unitid is not None:
+        everything = _all_institutions(None)
+        match = everything[everything["unitid"] == url_unitid]
+        if not match.empty:
+            url_row = match.iloc[0]
+            url_sector_label = next(
+                (k for k, v in labels.items() if v == int(url_row["sector"])),
+                None,
+            )
+            if url_sector_label:
+                default_label = url_sector_label
+
     sector_label = st.sidebar.selectbox(
         "Institution type", list(labels),
         index=list(labels).index(default_label),
@@ -134,8 +214,16 @@ def sidebar_selection() -> int:
         st.sidebar.error("No institutions with finance data in this sector.")
         st.stop()
 
+    default_index = 0
+    if url_row is not None and int(url_row["sector"]) == sector:
+        focus_name = config.FOCUS_UNITIDS.get(int(url_row["unitid"]))
+        for candidate in (focus_name, url_row["display"]):
+            if candidate in options:
+                default_index = options.index(candidate)
+                break
+
     choice = st.sidebar.selectbox(
-        "Search by name", options, index=0,
+        "Search by name", options, index=default_index,
         help="Start typing to search. Any institution named in the proposed "
              "endeavor appears at the top of its own sector.",
     )
@@ -160,6 +248,16 @@ def sidebar_peer_group(unitid: int) -> None:
     ]
     default = options.index(member_of[0]) if member_of else 0
 
+    url_peers = _url_state().get("peers")
+    if url_peers == "derived":
+        default = 0
+    elif url_peers == "chosen":
+        default = options.index(chosen_label)
+    elif url_peers in config.PEER_PRESET_SLUGS:
+        preset = config.PEER_PRESET_SLUGS[url_peers]
+        if preset in options:
+            default = options.index(preset)
+
     choice = st.sidebar.radio(
         "Comparison basis", options, index=default,
         help="The derived rule matches on sector, institutional level and "
@@ -175,8 +273,11 @@ def sidebar_peer_group(unitid: int) -> None:
         frame = _all_institutions(None)
         frame = frame[frame["unitid"] != int(unitid)]
         lookup = dict(zip(frame["display"], frame["unitid"]))
+        url_ids = set(_url_state().get("peer_ids") or [])
+        preselected = [d for d, u in lookup.items() if int(u) in url_ids]
         picked = st.sidebar.multiselect(
-            "Compare against", list(lookup), max_selections=8,
+            "Compare against", list(lookup), default=preselected,
+            max_selections=8,
             help="Any institution that files the GASB 34/35 finance survey.",
         )
         ids = [int(lookup[p]) for p in picked]
@@ -246,6 +347,10 @@ def sidebar_reference() -> None:
             "assigns every Texas public university to a peer group for "
             "accountability reporting."
         )
+    st.sidebar.caption(
+        "The address bar always encodes this view, institution and peer "
+        "basis both, so copying the URL shares exactly what is on screen."
+    )
     st.sidebar.caption(
         "Source: IPEDS, U.S. Department of Education. Public domain. "
         "No estimated or simulated figures appear anywhere in this "
@@ -318,6 +423,16 @@ def render_header(unitid: int) -> tuple[dict, int | None]:
         "part-time students, and it is the single strongest reason "
         "per-student comparisons need care."
     )
+    st.download_button(
+        "Download one-page brief",
+        brief.one_page_brief(unitid),
+        file_name=f"institutional_brief_{unitid}.html",
+        mime="text/html",
+        key=f"brief_{unitid}",
+        help="A print-ready single page: headline figures, spending position "
+             "against the current peer basis, revenue exposure and award "
+             "output. Opens in any browser and prints to PDF from there.",
+    )
     return summary, year
 
 
@@ -348,9 +463,10 @@ def render_overview(unitid: int, summary: dict, year: int | None) -> None:
 
     peers = transform.peer_count(unitid)
     enrolled = summary.get("fte") or 0
+    basis = transform.peer_group_basis(unitid)
     st.markdown(
-        f"FY{year}, measured against **{peers}** institutions of the same "
-        f"sector and level with enrollment within 50 percent of this one's."
+        f"FY{year}, measured against **{peers}** comparison institutions. "
+        f"Peer basis: {basis}."
     )
 
     for finding in findings:
@@ -358,6 +474,11 @@ def render_overview(unitid: int, summary: dict, year: int | None) -> None:
 
         if kind == "spending_gap":
             direction = "more" if finding["gap_per_fte"] > 0 else "less"
+            scale = (
+                f", or {short(abs(finding['gap_total']))} across "
+                f"{enrolled:,.0f} students"
+                if finding.get("gap_total") is not None and enrolled else ""
+            )
             takeaway(
                 f"<b>Its largest spending difference is "
                 f"{finding['function'].lower()}.</b> It spends "
@@ -365,8 +486,7 @@ def render_overview(unitid: int, summary: dict, year: int | None) -> None:
                 f"comparable institution spends "
                 f"{money(finding['peer'])}. That is "
                 f"{money(abs(finding['gap_per_fte']))} {direction} per "
-                f"student, or {short(abs(finding['gap_total']))} across "
-                f"{enrolled:,.0f} students."
+                f"student{scale}."
             )
 
         elif kind == "tuition_dependence":
@@ -473,23 +593,38 @@ def render_budget(unitid: int) -> None:
                            "per_fte"]].copy()
         display["share_of_total"] = (display["share_of_total"] * 100).round(1)
         display["per_fte"] = display["per_fte"].round(0)
-        st.dataframe(
+        data_table(
             display.rename(columns={
                 "function": "Function", "amount": "Expenses ($)",
                 "share_of_total": "Share (%)", "per_fte": "Per student ($)",
             }),
+            filename=f"expenses_by_function_{unitid}_FY{year}.csv",
+            key=f"dl_budget_{unitid}_{year}",
             hide_index=True, use_container_width=True, height=430,
         )
 
     if len(years) > 1:
         st.markdown(f"**Trend, FY{min(years)} to FY{max(years)}**")
-        st.caption(
+        trend_caption = (
             "Expenses per student by function and fiscal year. Nine functions "
             "across five years is a grid, so it is shown as one: a grouped "
             "bar chart at that size forces the reader to count bars, and "
             "assigning nine or ten colours to an ordered series would misuse "
             "colour to encode time."
         )
+        if transform.enrollment_years_available():
+            trend_caption += (
+                " Each year's per-student figure divides by that year's own "
+                "enrollment."
+            )
+        else:
+            trend_caption += (
+                " One caveat applies to every year: the per-student "
+                "denominator is the latest enrollment figure, so movement in "
+                "this grid is movement in spending, not in enrollment. See "
+                "the methodology notes."
+            )
+        st.caption(trend_caption)
         grid = frame.pivot_table(index="function", columns="fiscal_year",
                                  values="per_fte", aggfunc="sum")
         grid = grid.reindex(
@@ -525,7 +660,7 @@ def render_budget(unitid: int) -> None:
                 f"{money(top['last'])} in FY{last}, a change of "
                 f"{top['pct']:+.0%}."
             )
-            st.dataframe(
+            data_table(
                 movers.reset_index().rename(columns={
                     "function": "Function",
                     "first": f"FY{first} ($/student)",
@@ -535,6 +670,8 @@ def render_budget(unitid: int) -> None:
                           f"FY{last} ($/student)": 0}).assign(
                     Change=lambda d: (d["Change"] * 100).round(1)
                 ).rename(columns={"Change": "Change (%)"}),
+                filename=f"per_student_trend_{unitid}.csv",
+                key=f"dl_trend_{unitid}",
                 hide_index=True, use_container_width=True,
             )
 
@@ -545,11 +682,19 @@ def render_budget(unitid: int) -> None:
 
 def render_peers(unitid: int) -> None:
     st.subheader("Against comparable institutions")
-    st.caption(
-        "Peers are institutions in the same IPEDS sector and level whose "
-        "full-time-equivalent enrollment falls within 50 percent of this "
-        "one's. The rule is deliberately simple so that it can be checked."
-    )
+    basis = transform.peer_group_basis(unitid)
+    if basis.startswith("Derived"):
+        st.caption(
+            "Peers are institutions in the same IPEDS sector and level whose "
+            "full-time-equivalent enrollment falls within 50 percent of this "
+            "one's. The rule is deliberately simple so that it can be checked."
+        )
+    else:
+        st.caption(
+            f"Peer basis in use: {basis}, chosen in the sidebar. Every "
+            "comparison on this page is against the median of that group, "
+            "which never includes this institution itself."
+        )
 
     peers = transform.peer_set(unitid)
     if peers.empty:
@@ -591,10 +736,59 @@ def render_peers(unitid: int) -> None:
     st.plotly_chart(chart, use_container_width=True)
 
     with st.expander(f"The {len(peers)} institutions in this peer group"):
-        st.dataframe(
+        data_table(
             peers.rename(columns={"unitid": "UNITID", "name": "Institution",
                                   "state": "State", "fte": "Students (FTE)"}),
+            filename=f"peer_group_{unitid}.csv",
+            key=f"dl_peers_{unitid}",
             hide_index=True, use_container_width=True, height=330,
+        )
+
+    if transform.enrollment_years_available():
+        trend = transform.position_trend(unitid)
+        if not trend.empty and trend["fiscal_year"].nunique() > 1:
+            st.markdown("**Position over time**")
+            st.caption(
+                "Distance from the peer median per student, by function and "
+                "fiscal year, for the functions with the largest current "
+                "distance. Each year divides by that year's enrollment, and "
+                "each year's median is taken across the same peer basis. A "
+                "line moving toward zero is a position converging on the "
+                "peer median; moving away, diverging. Neither is a verdict."
+            )
+            latest = trend[trend["fiscal_year"] == trend["fiscal_year"].max()]
+            keep = (
+                latest.assign(magnitude=latest["gap_per_fte"].abs())
+                .sort_values("magnitude", ascending=False)["function"]
+                .head(5).tolist()
+            )
+            shown = trend[trend["function"].isin(keep)]
+            line = px.line(
+                shown, x="fiscal_year", y="gap_per_fte", color="function",
+                markers=True,
+                labels={"gap_per_fte": "Gap vs peer median, per student ($)",
+                        "fiscal_year": "", "function": ""},
+                color_discrete_sequence=theme.CATEGORICAL,
+            )
+            line.update_traces(
+                hovertemplate="FY%{x}<br>$%{y:,.0f} vs peer median<extra></extra>"
+            )
+            layout = theme.plotly_layout(400)
+            layout["xaxis"]["dtick"] = 1
+            line.update_layout(**layout)
+            line.add_hline(y=0, line_width=1, line_color=theme.NEUTRAL)
+            st.plotly_chart(line, use_container_width=True)
+            st.download_button(
+                "Download CSV",
+                trend.round(0).to_csv(index=False).encode("utf-8"),
+                file_name=f"position_trend_{unitid}.csv", mime="text/csv",
+                key=f"dl_postrend_{unitid}",
+            )
+    else:
+        st.caption(
+            "A position-over-time panel appears here once per-year enrollment "
+            "is loaded (the DRVEF12 files listed in docs/data-sources.md). "
+            "Without it, a per-student trend would move only with spending."
         )
 
 
@@ -662,7 +856,7 @@ def render_opportunities(unitid: int) -> None:
 
     display = gaps[["function", "target_per_fte", "peer_median_per_fte",
                     "gap_per_fte", "gap_total", "position"]].round(0)
-    st.dataframe(
+    data_table(
         display.rename(columns={
             "function": "Function",
             "target_per_fte": "This institution ($/student)",
@@ -670,6 +864,8 @@ def render_opportunities(unitid: int) -> None:
             "gap_per_fte": "Gap ($/student)", "gap_total": "Gap, total ($)",
             "position": "Position",
         }),
+        filename=f"spending_gaps_{unitid}_FY{year}.csv",
+        key=f"dl_gaps_{unitid}_{year}",
         hide_index=True, use_container_width=True,
     )
 
@@ -706,7 +902,7 @@ def render_planner(unitid: int) -> None:
                 "against.")
         return
 
-    enrolled = transform.fte(unitid)
+    enrolled = transform.fte_for_year(unitid, year)
     reported_total = float(current["total_expenses"].iloc[0])
     medians = dict(zip(gaps["function"], gaps["peer_median_per_fte"]))
 
@@ -781,8 +977,10 @@ def render_planner(unitid: int) -> None:
             "Effect": movement,
         })
 
-    st.dataframe(pd.DataFrame(rows).round(0), hide_index=True,
-                 use_container_width=True)
+    data_table(pd.DataFrame(rows).round(0),
+               filename=f"reallocation_plan_{unitid}_FY{year}.csv",
+               key=f"dl_plan_{unitid}_{year}",
+               hide_index=True, use_container_width=True)
     st.caption(
         '"Effect" reports only whether the planned figure sits closer to or '
         "further from the peer median than the current figure. It is a "
@@ -858,11 +1056,13 @@ def render_programs(unitid: int) -> None:
     if detail.empty:
         st.info("No programs at the selected levels in this field.")
     else:
-        st.dataframe(
+        data_table(
             detail[["cip_code", "level", "awards"]].rename(columns={
                 "cip_code": "CIP code", "level": "Award level",
                 "awards": "Awards conferred",
             }),
+            filename=f"programs_{unitid}_cip{family}.csv",
+            key=f"dl_programs_{unitid}_{family}",
             hide_index=True, use_container_width=True, height=320,
         )
         st.caption(
@@ -1037,7 +1237,7 @@ def render_returns(unitid: int) -> None:
                        "earnings_median", "debt_to_earnings",
                        "earnings_national_median", "vs_national"]].copy()
         table["debt_to_earnings"] = table["debt_to_earnings"].round(2)
-        st.dataframe(
+        data_table(
             table.rename(columns={
                 "program": "Program", "credential": "Credential",
                 "awards": "Awards", "debt_median": "Median debt ($)",
@@ -1046,6 +1246,8 @@ def render_returns(unitid: int) -> None:
                 "earnings_national_median": "National median ($)",
                 "vs_national": "Difference ($)",
             }).round(0),
+            filename=f"program_returns_{unitid}.csv",
+            key=f"dl_returns_{unitid}",
             hide_index=True, use_container_width=True, height=420,
         )
 
@@ -1148,11 +1350,13 @@ def render_revenue(unitid: int) -> None:
 
     display = current[["category", "source", "amount", "share_of_total"]].copy()
     display["share_of_total"] = (display["share_of_total"] * 100).round(1)
-    st.dataframe(
+    data_table(
         display.rename(columns={
             "category": "Category", "source": "Source",
             "amount": "Amount ($)", "share_of_total": "Share of total (%)",
         }),
+        filename=f"revenue_{unitid}_FY{year}.csv",
+        key=f"dl_revenue_{unitid}_{year}",
         hide_index=True, use_container_width=True,
     )
 
@@ -1211,10 +1415,12 @@ def render_revenue(unitid: int) -> None:
             pivot["Change (%)"] = (
                 (pivot[last_col] - pivot[first_col]) / pivot[first_col] * 100
             ).round(1)
-            st.dataframe(
+            data_table(
                 pivot.rename(columns={"category": "Category",
                                       "source": "Source"})
                      .sort_values("Change ($)", ascending=False).round(0),
+                filename=f"revenue_change_{unitid}_FY{earlier}_FY{later}.csv",
+                key=f"dl_revchange_{unitid}",
                 hide_index=True, use_container_width=True,
             )
 
@@ -1224,6 +1430,121 @@ def render_revenue(unitid: int) -> None:
         "appropriations are nonoperating in this schedule even though they "
         "fund core operations at a public university, which is why the "
         "category split is shown rather than a single total."
+    )
+
+
+# --------------------------------------------------------------------------
+# Compare two institutions
+# --------------------------------------------------------------------------
+
+def render_compare(unitid: int) -> None:
+    st.subheader("Two institutions, side by side")
+    st.caption(
+        "The same figures for two named institutions in parallel. A direct "
+        "comparison of two positions, not a ranking: differences in mission, "
+        "sector and scale drive legitimate differences in every figure here. "
+        "The peer basis in the sidebar plays no part in this view."
+    )
+
+    frame = _all_institutions(None)
+    others = frame[frame["unitid"] != int(unitid)]
+    lookup = dict(zip(others["display"], others["unitid"]))
+    if not lookup:
+        st.info("No second institution available.")
+        return
+
+    default_index = 0
+    focus_other = [u for u in config.FOCUS_UNITIDS if u != int(unitid)]
+    if focus_other:
+        display = others.loc[others["unitid"] == focus_other[0], "display"]
+        if not display.empty:
+            default_index = list(lookup).index(display.iloc[0])
+
+    pick = st.selectbox("Compare with", list(lookup), index=default_index,
+                        key=f"compare_pick_{unitid}")
+    other = int(lookup[pick])
+
+    pair = [(int(unitid), transform.institution_summary(unitid)),
+            (other, transform.institution_summary(other))]
+    years: dict[int, int | None] = {}
+
+    columns = st.columns(2)
+    for column, (uid, summary) in zip(columns, pair):
+        with column:
+            st.markdown(f"#### {summary.get('name', 'Unknown')}")
+            st.caption(
+                f"{summary.get('city', '')}, {summary.get('state', '')}"
+                f"  ·  {summary.get('sector_label', '')}"
+            )
+            expenses = transform.expenses_by_function(uid)
+            year = (int(expenses["fiscal_year"].max())
+                    if not expenses.empty else None)
+            years[uid] = year
+            position = transform.revenue_position(uid, year) if year else {}
+            fy = f"FY{year}" if year else "n/a"
+            first, second = st.columns(2)
+            first.metric("Students (FTE)", f"{summary.get('fte') or 0:,.0f}")
+            second.metric("Headcount", f"{summary.get('headcount') or 0:,.0f}")
+            first.metric(f"Expenses, {fy}",
+                         short(position.get("total_expenses")))
+            second.metric(f"Revenue, {fy}",
+                          short(position.get("total_revenue")))
+            first.metric("Tuition share of revenue",
+                         pct(position.get("tuition_dependence")))
+            second.metric("State appropriations share",
+                          pct(position.get("state_share")))
+
+    pieces = []
+    for uid, summary in pair:
+        year = years.get(uid)
+        if year is None:
+            continue
+        expenses = transform.expenses_by_function(uid)
+        current = expenses[expenses["fiscal_year"] == year]
+        piece = current[["function", "per_fte"]].dropna().copy()
+        piece["institution"] = summary.get("name", str(uid))
+        pieces.append(piece)
+
+    if len(pieces) < 2:
+        st.info(
+            "One of the two institutions has no current filing on the GASB "
+            "schedule, so the per-student comparison is not available."
+        )
+        return
+
+    year_a, year_b = years[int(unitid)], years[other]
+    if year_a != year_b:
+        st.caption(
+            f"Latest filings differ: FY{year_a} against FY{year_b}. Each "
+            "institution is shown at its own most recent year."
+        )
+
+    st.markdown("**Spending per student by function**")
+    both = pd.concat(pieces)
+    order = [name for _, s in pair for name in [s.get("name")] if name]
+    chart = px.bar(
+        both, x="function", y="per_fte", color="institution",
+        barmode="group",
+        labels={"per_fte": "Expenses per student ($)", "function": "",
+                "institution": ""},
+        color_discrete_sequence=[theme.CATEGORICAL[0], theme.CATEGORICAL[1]],
+        category_orders={"institution": order},
+    )
+    chart.update_traces(marker_line_width=0,
+                        hovertemplate="%{x}<br>$%{y:,.0f}<extra></extra>")
+    chart.update_layout(**theme.plotly_layout(430))
+    st.plotly_chart(chart, use_container_width=True)
+
+    wide = (both.pivot_table(index="function", columns="institution",
+                             values="per_fte", aggfunc="max")
+            .round(0).reset_index()
+            .rename(columns={"function": "Function"}))
+    wide.columns = [str(c) for c in wide.columns]
+    data_table(
+        wide,
+        filename=f"side_by_side_{unitid}_{other}.csv",
+        key=f"dl_compare_{unitid}_{other}",
+        hide_index=True, use_container_width=True,
     )
 
 
@@ -1259,6 +1580,7 @@ def main() -> None:
 
     unitid = sidebar_selection()
     sidebar_peer_group(unitid)
+    _write_url(unitid)
     sidebar_reference()
 
     summary, year = render_header(unitid)
@@ -1267,6 +1589,7 @@ def main() -> None:
     tabs = st.tabs([
         "Overview", "Budget allocation", "Peer comparison", "Opportunities",
         "Reallocation planner", "Program mix", "Program returns", "Revenue",
+        "Compare",
     ])
     with tabs[0]:
         render_overview(unitid, summary, year)
@@ -1284,6 +1607,8 @@ def main() -> None:
         render_returns(unitid)
     with tabs[7]:
         render_revenue(unitid)
+    with tabs[8]:
+        render_compare(unitid)
 
     render_footer()
 

@@ -63,7 +63,51 @@ def connect() -> duckdb.DuckDBPyConnection:
                 f"database connection is cached for the life of the process, "
                 f"so Streamlit has to be stopped and started again."
             )
+    _register_fte_year(con)
     return con
+
+
+def enrollment_years_available() -> bool:
+    """Whether the optional per-year enrollment extract was built."""
+    return (config.PROCESSED / "enrollment_years.parquet").exists()
+
+
+def _register_fte_year(con: duckdb.DuckDBPyConnection) -> None:
+    """One view, fte_year, serves every year-matched per-student figure.
+
+    When the per-year extract exists, each fiscal year's dollars divide by
+    that year's own enrollment, falling back to the latest snapshot for any
+    institution and year the extract does not cover. When it does not exist,
+    the snapshot serves every year and the interface says so. Either way the
+    view exists, so no query needs to know which case it is in.
+    """
+    path = config.PROCESSED / "enrollment_years.parquet"
+    if path.exists():
+        con.execute(
+            f"CREATE OR REPLACE VIEW enrollment_years AS "
+            f"SELECT * FROM read_parquet({_quoted(path)})"
+        )
+        con.execute(
+            """
+            CREATE OR REPLACE VIEW fte_year AS
+            SELECT k.UNITID, k.fiscal_year,
+                   COALESCE(y.fte, e.FTE12MN)      AS fte,
+                   COALESCE(y.headcount, e.UNDUP)  AS headcount
+            FROM (SELECT DISTINCT UNITID, fiscal_year FROM finance) k
+            LEFT JOIN enrollment_years y USING (UNITID, fiscal_year)
+            LEFT JOIN enrollment e USING (UNITID)
+            """
+        )
+    else:
+        con.execute(
+            """
+            CREATE OR REPLACE VIEW fte_year AS
+            SELECT k.UNITID, k.fiscal_year,
+                   e.FTE12MN AS fte, e.UNDUP AS headcount
+            FROM (SELECT DISTINCT UNITID, fiscal_year FROM finance) k
+            LEFT JOIN enrollment e USING (UNITID)
+            """
+        )
 
 
 @functools.lru_cache(maxsize=1)
@@ -152,7 +196,12 @@ def sectors_present(finance_only: bool = True) -> pd.DataFrame:
 
 
 def expenses_by_function(unitid: int) -> pd.DataFrame:
-    """Expenses by functional category and fiscal year, with per-FTE and share."""
+    """Expenses by functional category and fiscal year, with per-FTE and share.
+
+    Per-FTE divides each fiscal year's dollars by that year's enrollment via
+    the fte_year view, which falls back to the latest snapshot when per-year
+    enrollment has not been loaded.
+    """
     unitid = int(unitid)
     sql = """
         WITH e AS (
@@ -164,16 +213,17 @@ def expenses_by_function(unitid: int) -> pd.DataFrame:
             SELECT fiscal_year, amount AS total
             FROM finance
             WHERE UNITID = ? AND section = 'expense_total'
-        ),
-        n AS (SELECT FTE12MN AS fte FROM enrollment WHERE UNITID = ?)
+        )
         SELECT e.fiscal_year        AS fiscal_year,
                e.line_item          AS function,
                e.amount             AS amount,
                t.total              AS total_expenses,
-               e.amount / NULLIF(t.total, 0)                  AS share_of_total,
-               e.amount / NULLIF((SELECT fte FROM n), 0)      AS per_fte
+               e.amount / NULLIF(t.total, 0)   AS share_of_total,
+               e.amount / NULLIF(fy.fte, 0)    AS per_fte
         FROM e
         LEFT JOIN t USING (fiscal_year)
+        LEFT JOIN fte_year fy
+               ON fy.UNITID = ? AND fy.fiscal_year = e.fiscal_year
         WHERE e.amount > 0
         ORDER BY e.fiscal_year DESC, e.amount DESC
     """
@@ -328,6 +378,10 @@ def peer_comparison(unitid: int, fiscal_year: int) -> pd.DataFrame:
     reason: only a minority of institutions operate hospitals, so a median
     taken across those that do is enormous and comparing a non-hospital
     institution against it is meaningless.
+
+    The median is taken across the peers only. The target is excluded, so an
+    institution is never part of its own benchmark, matching every other
+    peer figure in this module.
     """
     peers = peer_set(unitid)
     if peers.empty:
@@ -336,21 +390,70 @@ def peer_comparison(unitid: int, fiscal_year: int) -> pd.DataFrame:
     placeholders = ", ".join("?" for _ in ids)
     sql = f"""
         SELECT f.line_item AS function,
-               median(f.amount / NULLIF(e.FTE12MN, 0)) AS peer_median_per_fte,
-               max(CASE WHEN f.UNITID = ? THEN f.amount / NULLIF(e.FTE12MN, 0) END)
+               median(CASE WHEN f.UNITID <> ?
+                           THEN f.amount / NULLIF(e.fte, 0) END)
+                   AS peer_median_per_fte,
+               max(CASE WHEN f.UNITID = ? THEN f.amount / NULLIF(e.fte, 0) END)
                    AS target_per_fte
         FROM finance f
-        JOIN enrollment e USING (UNITID)
+        JOIN fte_year e
+          ON e.UNITID = f.UNITID AND e.fiscal_year = f.fiscal_year
         WHERE f.section = 'expense' AND f.fiscal_year = ?
           AND f.UNITID IN ({placeholders})
-          AND f.amount > 0 AND e.FTE12MN > 0
+          AND f.amount > 0 AND e.fte > 0
         GROUP BY f.line_item
         HAVING max(CASE WHEN f.UNITID = ? THEN f.amount END) IS NOT NULL
         ORDER BY target_per_fte DESC
     """
     return connect().execute(
-        sql, [int(unitid), int(fiscal_year), *ids, int(unitid)]
+        sql, [int(unitid), int(unitid), int(fiscal_year), *ids, int(unitid)]
     ).df()
+
+
+def position_trend(unitid: int) -> pd.DataFrame:
+    """Target vs peer median per student, by function and fiscal year.
+
+    The same comparison peer_comparison makes for one year, made for every
+    year loaded, so the reader can see whether a position is stable, opening
+    or closing. Observational throughout: the gap is a distance from the
+    median of the active peer basis, never a target to hit.
+
+    Meaningful as a trend only when per-year enrollment is loaded. With the
+    snapshot fallback the per-student series moves only with spending, so the
+    caller should gate this view on enrollment_years_available().
+    """
+    peers = peer_set(unitid)
+    if peers.empty:
+        return pd.DataFrame()
+    ids = [int(unitid)] + [int(x) for x in peers["unitid"].tolist()]
+    placeholders = ", ".join("?" for _ in ids)
+    sql = f"""
+        SELECT f.fiscal_year AS fiscal_year,
+               f.line_item   AS function,
+               median(CASE WHEN f.UNITID <> ?
+                           THEN f.amount / NULLIF(e.fte, 0) END)
+                   AS peer_median_per_fte,
+               max(CASE WHEN f.UNITID = ? THEN f.amount / NULLIF(e.fte, 0) END)
+                   AS target_per_fte
+        FROM finance f
+        JOIN fte_year e
+          ON e.UNITID = f.UNITID AND e.fiscal_year = f.fiscal_year
+        WHERE f.section = 'expense'
+          AND f.UNITID IN ({placeholders})
+          AND f.amount > 0 AND e.fte > 0
+        GROUP BY f.fiscal_year, f.line_item
+        HAVING max(CASE WHEN f.UNITID = ? THEN f.amount END) IS NOT NULL
+        ORDER BY f.fiscal_year, f.line_item
+    """
+    frame = connect().execute(
+        sql, [int(unitid), int(unitid), *ids, int(unitid)]
+    ).df()
+    if frame.empty:
+        return frame
+    frame = frame.dropna(subset=["target_per_fte", "peer_median_per_fte"])
+    frame = frame.copy()
+    frame["gap_per_fte"] = frame["target_per_fte"] - frame["peer_median_per_fte"]
+    return frame
 
 
 def program_mix(unitid: int, top_n: int = 15) -> pd.DataFrame:
@@ -397,6 +500,22 @@ def fte(unitid: int) -> float | None:
     return float(row[0]) if row and row[0] else None
 
 
+def fte_for_year(unitid: int, fiscal_year: int) -> float | None:
+    """FTE enrollment matched to a fiscal year, via the fte_year view.
+
+    Falls back to the latest snapshot when the per-year extract is absent or
+    does not cover this institution and year, so a caller always gets the
+    best denominator available rather than a hole.
+    """
+    row = connect().execute(
+        "SELECT fte FROM fte_year WHERE UNITID = ? AND fiscal_year = ?",
+        [int(unitid), int(fiscal_year)],
+    ).fetchone()
+    if row and row[0]:
+        return float(row[0])
+    return fte(unitid)
+
+
 def opportunity_analysis(unitid: int, fiscal_year: int) -> pd.DataFrame:
     """Every functional gap against the peer median, expressed in dollars.
 
@@ -413,7 +532,7 @@ def opportunity_analysis(unitid: int, fiscal_year: int) -> pd.DataFrame:
     if comparison.empty:
         return pd.DataFrame()
 
-    enrolled = fte(unitid)
+    enrolled = fte_for_year(unitid, fiscal_year)
     frame = comparison.dropna(subset=["target_per_fte", "peer_median_per_fte"]).copy()
     if frame.empty:
         return pd.DataFrame()
@@ -549,7 +668,7 @@ def revenue_position(unitid: int, fiscal_year: int) -> dict:
         out["state_appropriations"] / total
         if total and out.get("state_appropriations") else None
     )
-    enrolled = fte(unitid)
+    enrolled = fte_for_year(unitid, fiscal_year)
     out["fte"] = enrolled
     out["revenue_per_fte"] = total / enrolled if total and enrolled else None
     out["gifts_per_fte"] = (
@@ -583,9 +702,10 @@ def peer_revenue_benchmarks(unitid: int, fiscal_year: int) -> dict:
                        THEN f.amount END) AS gifts,
               max(CASE WHEN f.line_item = 'Sales and services of auxiliary enterprises'
                        THEN f.amount END) AS auxiliary,
-              max(e.FTE12MN)              AS fte
+              max(e.fte)                  AS fte
             FROM finance f
-            JOIN enrollment e USING (UNITID)
+            JOIN fte_year e
+              ON e.UNITID = f.UNITID AND e.fiscal_year = f.fiscal_year
             WHERE f.fiscal_year = ? AND f.UNITID IN ({placeholders})
             GROUP BY f.UNITID
         )
@@ -746,7 +866,8 @@ def headline_findings(unitid: int, fiscal_year: int) -> list[dict]:
             "target": float(biggest["target_per_fte"]),
             "peer": float(biggest["peer_median_per_fte"]),
             "gap_per_fte": float(biggest["gap_per_fte"]),
-            "gap_total": float(biggest["gap_total"]),
+            "gap_total": (float(biggest["gap_total"])
+                          if biggest["gap_total"] is not None else None),
         })
 
     position = revenue_position(unitid, fiscal_year)
