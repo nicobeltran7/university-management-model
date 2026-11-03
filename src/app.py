@@ -387,13 +387,13 @@ def render_header(unitid: int) -> tuple[dict, int | None]:
 
     columns = st.columns(5)
     with columns[0]:
-        stat_tile("Students (FTE)", f"{fte or 0:,.0f}",
+        stat_tile(f"Students (FTE), {config.ENROLLMENT_SNAPSHOT_LABEL}", f"{fte or 0:,.0f}",
                   fte, medians.get("fte"))
     with columns[1]:
-        stat_tile("Headcount", f"{headcount or 0:,.0f}",
+        stat_tile(f"Headcount, {config.ENROLLMENT_SNAPSHOT_LABEL}", f"{headcount or 0:,.0f}",
                   headcount, medians.get("headcount"))
     with columns[4]:
-        stat_tile("Enrollment intensity",
+        stat_tile(f"Enrollment intensity, {config.ENROLLMENT_SNAPSHOT_LABEL}",
                   f"{intensity:.0%}" if intensity else "n/a",
                   intensity, medians.get("intensity"))
     if year:
@@ -421,7 +421,15 @@ def render_header(unitid: int) -> tuple[dict, int | None]:
         "achievement. Enrollment intensity is FTE divided by headcount: "
         "near 100% means a mostly full-time student body, lower means more "
         "part-time students, and it is the single strongest reason "
-        "per-student comparisons need care."
+        "per-student comparisons need care. "
+        f"Enrollment tiles are the {config.ENROLLMENT_SNAPSHOT_LABEL} "
+        "academic year, the latest IPEDS release; finance tiles are "
+        f"FY{year}. "
+        + ("Per-student figures in every view divide each fiscal year by "
+           "that year's own enrollment, never by the tiles above."
+           if transform.enrollment_years_available() else
+           "Per-student figures divide by the enrollment snapshot above, "
+           "the only enrollment year loaded.")
     )
     st.download_button(
         "Download one-page brief",
@@ -462,7 +470,10 @@ def render_overview(unitid: int, summary: dict, year: int | None) -> None:
         return
 
     peers = transform.peer_count(unitid)
-    enrolled = summary.get("fte") or 0
+    # The dollar total is per-student gap times that fiscal year's own
+    # enrollment, so the student count printed beside it is the same year's.
+    enrolled = (transform.fte_for_year(unitid, year)
+                or summary.get("fte") or 0)
     basis = transform.peer_group_basis(unitid)
     st.markdown(
         f"FY{year}, measured against **{peers}** comparison institutions. "
@@ -476,7 +487,7 @@ def render_overview(unitid: int, summary: dict, year: int | None) -> None:
             direction = "more" if finding["gap_per_fte"] > 0 else "less"
             scale = (
                 f", or {short(abs(finding['gap_total']))} across "
-                f"{enrolled:,.0f} students"
+                f"{enrolled:,.0f} students in FY{year}"
                 if finding.get("gap_total") is not None and enrolled else ""
             )
             takeaway(
@@ -738,7 +749,8 @@ def render_peers(unitid: int) -> None:
     with st.expander(f"The {len(peers)} institutions in this peer group"):
         data_table(
             peers.rename(columns={"unitid": "UNITID", "name": "Institution",
-                                  "state": "State", "fte": "Students (FTE)"}),
+                                  "state": "State",
+                                  "fte": f"Students (FTE), {config.ENROLLMENT_SNAPSHOT_LABEL}"}),
             filename=f"peer_group_{unitid}.csv",
             key=f"dl_peers_{unitid}",
             hide_index=True, use_container_width=True, height=330,
@@ -846,13 +858,13 @@ def render_opportunities(unitid: int) -> None:
     st.markdown("**Read in order of size**")
     for _, row in gaps.head(5).iterrows():
         direction = "more" if row["gap_per_fte"] > 0 else "less"
-        st.markdown(
+        st.markdown(theme.markdown_safe(
             f"- **{row['function']}**: {money(row['target_per_fte'])} per "
             f"student against a peer median of "
-            f"{money(row['peer_median_per_fte'])}. That is "
+            f"{money(row['peer_median_per_fte'])} in FY{year}. That is "
             f"{money(abs(row['gap_per_fte']))} {direction} per student, or "
             f"**{money(abs(row['gap_total']))}** across the institution."
-        )
+        ))
 
     display = gaps[["function", "target_per_fte", "peer_median_per_fte",
                     "gap_per_fte", "gap_total", "position"]].round(0)
@@ -942,11 +954,11 @@ def render_planner(unitid: int) -> None:
     )
 
     if abs(difference) > reported_total * 0.001:
-        st.error(
+        st.error(theme.markdown_safe(
             f"The plan is out of balance by {money(abs(difference))}. Adjust "
             "the sliders until the difference is close to zero, so the plan "
             "is a reallocation rather than a change in total spending."
-        )
+        ))
     else:
         st.success("The plan balances against the reported total.")
 
@@ -995,7 +1007,8 @@ def render_planner(unitid: int) -> None:
 def render_programs(unitid: int) -> None:
     st.subheader("What the institution produces")
     st.caption(
-        "Awards conferred, IPEDS Completions survey, first majors only so a "
+        f"Awards conferred in academic year {config.COMPLETIONS_LABEL} "
+        "(July to June), IPEDS Completions survey, first majors only so a "
         "double major is counted once. The file carries detail levels only, "
         "with no aggregate rows, so summing across levels does not double "
         "count."
@@ -1018,7 +1031,8 @@ def render_programs(unitid: int) -> None:
     stats = transform.concentration(unitid, levels=levels)
     if stats:
         columns = st.columns(4)
-        columns[0].metric("Awards conferred", f"{stats['total_awards']:,.0f}")
+        columns[0].metric(f"Awards conferred, {config.COMPLETIONS_LABEL}",
+                          f"{stats['total_awards']:,.0f}")
         columns[1].metric("Fields of study", f"{stats['fields']}")
         columns[2].metric("Largest field", pct(stats["top_share"]),
                           help=stats["top_field"])
@@ -1121,7 +1135,9 @@ def render_returns(unitid: int) -> None:
     st.caption(
         "Median earnings five years after entry against median federal loan "
         "debt at completion, by program and credential. Source: College "
-        "Scorecard field-of-study file, U.S. Department of Education."
+        "Scorecard field-of-study file, most recent cohorts release, U.S. "
+        "Department of Education. These are pooled multi-year cohorts, so "
+        "they are not tied to a single fiscal or academic year."
     )
 
     if not transform.programs_available():
@@ -1483,8 +1499,10 @@ def render_compare(unitid: int) -> None:
             position = transform.revenue_position(uid, year) if year else {}
             fy = f"FY{year}" if year else "n/a"
             first, second = st.columns(2)
-            first.metric("Students (FTE)", f"{summary.get('fte') or 0:,.0f}")
-            second.metric("Headcount", f"{summary.get('headcount') or 0:,.0f}")
+            first.metric(f"Students (FTE), {config.ENROLLMENT_SNAPSHOT_LABEL}",
+                         f"{summary.get('fte') or 0:,.0f}")
+            second.metric(f"Headcount, {config.ENROLLMENT_SNAPSHOT_LABEL}",
+                          f"{summary.get('headcount') or 0:,.0f}")
             first.metric(f"Expenses, {fy}",
                          short(position.get("total_expenses")))
             second.metric(f"Revenue, {fy}",
@@ -1561,7 +1579,9 @@ def render_footer() -> None:
         "National Center for Education Statistics, U.S. Department of "
         "Education. Public domain.<br>"
         "Finance and revenue: fiscal years 2020 through 2024, GASB 34/35 "
-        "schedule. Directory, enrollment and completions: 2025 collection. "
+        "schedule. Directory: 2025 file. Enrollment tiles and completions: "
+        f"academic year {config.ENROLLMENT_SNAPSHOT_LABEL}. Per-student "
+        "figures: each fiscal year's own enrollment. "
         "FY2024 is a provisional release and may be revised.<br>"
         "No figure in this application is estimated, simulated or projected. "
         "Every comparison is against an observed value."

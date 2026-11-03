@@ -167,6 +167,16 @@ def exact_money(value: float | None) -> str:
     return f"${value:,.0f}"
 
 
+def markdown_safe(text: str) -> str:
+    """Escape dollar signs before text goes through st.markdown.
+
+    Streamlit reads a pair of dollar signs as inline LaTeX, so a sentence
+    carrying two dollar amounts renders as run-together italic maths. HTML
+    blocks passed with unsafe_allow_html are not affected; plain markdown is.
+    """
+    return text.replace("$", "\\$")
+
+
 def plotly_layout(height: int = 420, legend: bool = True) -> dict:
     """Shared layout: recessive grid and axes, ink-coloured text, no chartjunk."""
     return dict(

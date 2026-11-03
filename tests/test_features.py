@@ -65,3 +65,19 @@ def test_brief_names_the_peer_basis_in_force():
     transform.set_peer_group("THECB Master's Universities (Texas)")
     page = brief.one_page_brief(UHD)
     assert "THECB Master" in page
+
+
+def test_markdown_safe_escapes_every_dollar_sign():
+    # Two dollar amounts in one st.markdown string render as LaTeX unless
+    # escaped, which garbled the Opportunities bullets before this fix.
+    from src import theme
+    text = "spends $3,951 against $1,661"
+    assert theme.markdown_safe(text) == "spends \\$3,951 against \\$1,661"
+    assert "$" not in theme.markdown_safe(text).replace("\\$", "")
+
+
+def test_snapshot_year_labels_are_academic_years():
+    for label in (config.ENROLLMENT_SNAPSHOT_LABEL, config.COMPLETIONS_LABEL):
+        start, end = label.split("-")
+        assert len(start) == 4 and len(end) == 2
+        assert int(end) == (int(start) + 1) % 100

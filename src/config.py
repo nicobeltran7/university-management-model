@@ -170,6 +170,13 @@ HD_COLUMNS = [
     "HLOFFER", "LOCALE", "C21BASIC", "CARNEGIESIZE", "INSTSIZE", "LANDGRNT",
 ]
 
+# Academic year covered by the single-snapshot files, shown next to every
+# figure read from them so no metric appears without its year. DRVEF122025
+# covers the twelve months ending June 2025; C2025_A counts awards conferred
+# July 2024 to June 2025. Finance figures carry their own fiscal year label.
+ENROLLMENT_SNAPSHOT_LABEL = "2024-25"
+COMPLETIONS_LABEL = "2024-25"
+
 # Derived 12-month enrollment (DRVEF12) columns retained.
 ENROLLMENT_COLUMNS = ["UNITID", "FTE12MN", "UNDUP", "UNDUPUG"]
 

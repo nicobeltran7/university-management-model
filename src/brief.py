@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import html
 
-from src import theme, transform
+from src import config, theme, transform
 
 
 def _esc(value) -> str:
@@ -85,9 +85,12 @@ def one_page_brief(unitid: int) -> str:
         f"<div class='stat'><div class='label'>{label}</div>"
         f"<div class='value'>{value}</div></div>"
         for label, value in (
-            ("Students (FTE)", f"{fte:,.0f}" if fte else "n/a"),
-            ("Headcount", f"{headcount:,.0f}" if headcount else "n/a"),
-            ("Enrollment intensity", _pct(intensity, 0)),
+            (f"Students (FTE), {config.ENROLLMENT_SNAPSHOT_LABEL}",
+             f"{fte:,.0f}" if fte else "n/a"),
+            (f"Headcount, {config.ENROLLMENT_SNAPSHOT_LABEL}",
+             f"{headcount:,.0f}" if headcount else "n/a"),
+            (f"Enrollment intensity, {config.ENROLLMENT_SNAPSHOT_LABEL}",
+             _pct(intensity, 0)),
             (f"Total expenses, {fy_label}",
              _short(position.get("total_expenses"))),
             (f"Total revenue, {fy_label}",
